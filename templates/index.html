@@ -6,6 +6,9 @@
   <title>Asho AI</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  {% if auth_enabled and google_client_id %}
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  {% endif %}
   <style>
     :root {
       --bg: #1f1f1f;
@@ -265,6 +268,11 @@
       align-items: center;
       gap: 8px;
     }
+    .auth-box { display: flex; align-items: center; gap: 8px; }
+    .auth-name { font-size: 12px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+    .google-anchor { min-width: 180px; min-height: 34px; }
+    .auth-required { width: 100%; max-width: var(--content-w); margin: 18px auto 0; padding: 0 16px; color: var(--muted); font-size: 14px; }
 
     .mobile-toggle {
       display: none;
@@ -596,6 +604,11 @@
         <div class="chat-title" id="chatTitle">Asho AI</div>
 
         <div class="header-right">
+          <div id="authBox" class="auth-box">
+            <span id="authName" class="auth-name" style="display:none;"></span>
+            <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
+            <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
+          </div>
           <button id="themeToggle" class="header-action" type="button" aria-label="Toggle theme">
             <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
           </button>
@@ -606,6 +619,7 @@
         <div id="welcomePanel" class="welcome-panel">
           <img class="welcome-mark" src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
         </div>
+        <div id="authRequired" class="auth-required" style="display:none;">Please sign in with Google to start chatting.</div>
       </section>
 
       <div class="input-bar">
@@ -632,6 +646,10 @@
     const historyEl = document.getElementById("history");
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
+    const authName = document.getElementById("authName");
+    const googleSignInEl = document.getElementById("googleSignIn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const authRequired = document.getElementById("authRequired");
     const themeToggle = document.getElementById("themeToggle");
     const themeIcon = document.getElementById("themeIcon");
 
@@ -647,6 +665,9 @@
     let isStreaming = false;
     let chats = [];
     let activeChatId = null;
+    let currentUser = null;
+    const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
+    const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
     function isMobile() {
       return window.matchMedia("(max-width: 900px)").matches;
@@ -659,9 +680,79 @@
         payload = await res.json();
       } catch {}
       if (!res.ok) {
+        if (res.status === 401) {
+          updateAuthUI(null);
+          if (AUTH_ENABLED) showAuthRequired(true);
+        }
         throw new Error(payload.error || "Request failed.");
       }
       return payload;
+    }
+
+    function showAuthRequired(show) {
+      authRequired.style.display = show ? "block" : "none";
+      input.disabled = show;
+      sendBtn.disabled = show;
+      newChatBtn.disabled = show;
+    }
+
+    function updateAuthUI(user) {
+      currentUser = user || null;
+      if (!AUTH_ENABLED) {
+        googleSignInEl.style.display = "none";
+        logoutBtn.style.display = "none";
+        authName.style.display = "none";
+        showAuthRequired(false);
+        return;
+      }
+      if (currentUser) {
+        authName.textContent = currentUser.name || currentUser.email || "Signed in";
+        authName.style.display = "inline";
+        logoutBtn.style.display = "inline-block";
+        googleSignInEl.style.display = "none";
+        showAuthRequired(false);
+      } else {
+        authName.style.display = "none";
+        logoutBtn.style.display = "none";
+        googleSignInEl.style.display = "block";
+        showAuthRequired(true);
+      }
+    }
+
+    async function loadAuthState() {
+      const res = await fetch("/auth/me");
+      if (!res.ok) return;
+      const payload = await res.json();
+      updateAuthUI(payload.user || null);
+    }
+
+    async function handleGoogleCredential(credential) {
+      const res = await fetch("/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential }),
+      });
+      if (!res.ok) {
+        updateAuthUI(null);
+        return;
+      }
+      const payload = await res.json();
+      updateAuthUI(payload.user || null);
+      await loadConversations(null, { autoSelectExisting: false }).catch(() => {});
+    }
+
+    function initGoogleSignIn() {
+      if (!AUTH_ENABLED) return;
+      if (!window.google || !GOOGLE_CLIENT_ID) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (resp) => handleGoogleCredential(resp.credential),
+      });
+      window.google.accounts.id.renderButton(googleSignInEl, {
+        theme: "outline",
+        size: "medium",
+        width: 210,
+      });
     }
 
     function updateChatMeta(id, title) {
@@ -946,6 +1037,14 @@
       const current = document.body.getAttribute("data-theme") === "light" ? "light" : "dark";
       applyTheme(current === "light" ? "dark" : "light");
     });
+    logoutBtn.addEventListener("click", async () => {
+      await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+      updateAuthUI(null);
+      activeChatId = null;
+      clearMessages();
+      refreshWelcome();
+      renderHistory();
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -956,6 +1055,7 @@
 
       const text = input.value.trim();
       if (!text) return;
+      if (AUTH_ENABLED && !currentUser) return;
 
       setStreaming(true);
       input.value = "";
@@ -1042,11 +1142,15 @@
 
     initTheme();
     autoResize();
-    loadConversations(null, { autoSelectExisting: false }).catch(() => {
+    loadAuthState().then(() => {
+      if (AUTH_ENABLED && !currentUser) return;
+      return loadConversations(null, { autoSelectExisting: false });
+    }).catch(() => {
       chatTitle.textContent = "Asho AI";
       clearMessages();
       refreshWelcome();
     });
+    setTimeout(initGoogleSignIn, 200);
   </script>
 </body>
 </html>

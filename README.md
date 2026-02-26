@@ -21,6 +21,9 @@ Copy-Item .env.example .env
 4. Set environment variables.
 ```powershell
 $env:FLASK_DEBUG="1"
+$env:FLASK_SECRET_KEY="change-me-strong-secret"
+$env:COOKIE_SECURE="0"
+$env:GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
 ```
@@ -39,6 +42,9 @@ python main.py
 - Start Command: `gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120`
 4. Add environment variables in Render:
 - `FLASK_DEBUG=0`
+- `FLASK_SECRET_KEY=<strong-random-secret>`
+- `COOKIE_SECURE=1`
+- `GOOGLE_CLIENT_ID=<google-oauth-client-id>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
 - `MAX_MESSAGE_CHARS=4000`
@@ -56,3 +62,8 @@ If API key is empty, app uses local/remote Ollama host via `OLLAMA_HOST` (defaul
 
 Conversations are stored in SQLite: `data/conversations.db`.
 On first startup, legacy `data/conversations.json` data is auto-migrated.
+
+## Google Login
+
+If `GOOGLE_CLIENT_ID` is set, users must sign in with Google and each user sees only their own conversations.
+If empty, app stays public mode and uses shared `public` conversations.

@@ -8,14 +8,21 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, session
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 
 app = Flask(__name__, static_folder="static", static_url_path="/assets")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me-in-production")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("COOKIE_SECURE", "1") == "1"
 
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
@@ -54,6 +61,7 @@ def init_db():
                 """
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
+                    user_sub TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -67,12 +75,20 @@ def init_db():
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+                CREATE INDEX IF NOT EXISTS idx_conversations_user_sub ON conversations(user_sub);
                 """
             )
+            ensure_schema_columns(conn)
             migrate_legacy_json_if_needed(conn)
             conn.commit()
         finally:
             conn.close()
+
+
+def ensure_schema_columns(conn):
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+    if "user_sub" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN user_sub TEXT NOT NULL DEFAULT 'public'")
 
 
 def migrate_legacy_json_if_needed(conn):
@@ -158,9 +174,10 @@ def is_rate_limited(ip):
 def create_conversation(conn, title="New chat"):
     now = utc_now_iso()
     cid = str(uuid4())
+    user_sub = current_user_sub()
     conn.execute(
-        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (cid, title, now, now),
+        "INSERT INTO conversations (id, user_sub, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (cid, user_sub, title, now, now),
     )
     return {"id": cid, "title": title, "created_at": now, "updated_at": now}
 
@@ -182,9 +199,70 @@ def get_conversation_messages(conn, conversation_id):
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
+def is_auth_enabled():
+    return bool(GOOGLE_CLIENT_ID)
+
+
+def current_user_sub():
+    if not is_auth_enabled():
+        return "public"
+    user = session.get("user")
+    if not user:
+        return None
+    return user.get("sub")
+
+
+def require_user():
+    sub = current_user_sub()
+    if sub:
+        return sub
+    return None
+
+
 @app.get("/")
 def index():
-    return render_template("index.html", model=MODEL_NAME)
+    return render_template(
+        "index.html",
+        model=MODEL_NAME,
+        google_client_id=GOOGLE_CLIENT_ID,
+        auth_enabled=is_auth_enabled(),
+    )
+
+
+@app.get("/auth/me")
+def auth_me():
+    user = session.get("user")
+    return jsonify({"auth_enabled": is_auth_enabled(), "user": user})
+
+
+@app.post("/auth/google")
+def auth_google():
+    if not is_auth_enabled():
+        return jsonify({"error": "google auth disabled"}), 503
+    payload = request.get_json(silent=True) or {}
+    credential = (payload.get("credential") or "").strip()
+    if not credential:
+        return jsonify({"error": "credential is required"}), 400
+    try:
+        info = id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except Exception as exc:
+        app.logger.warning("google token verify failed: %s", exc)
+        return jsonify({"error": "invalid google token"}), 401
+    session["user"] = {
+        "sub": info.get("sub"),
+        "email": info.get("email"),
+        "name": info.get("name"),
+        "picture": info.get("picture"),
+    }
+    return jsonify({"ok": True, "user": session["user"]})
+
+
+@app.post("/auth/logout")
+def auth_logout():
+    session.pop("user", None)
+    return jsonify({"ok": True})
 
 
 @app.get("/health")
@@ -194,6 +272,9 @@ def health():
 
 @app.get("/conversations")
 def list_conversations():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     with DB_LOCK:
         conn = get_db()
         try:
@@ -203,9 +284,11 @@ def list_conversations():
                        COUNT(m.id) AS message_count
                 FROM conversations c
                 LEFT JOIN messages m ON m.conversation_id = c.id
+                WHERE c.user_sub = ?
                 GROUP BY c.id
                 ORDER BY c.updated_at DESC
-                """
+                """,
+                (user_sub,),
             ).fetchall()
             items = [
                 {
@@ -224,6 +307,9 @@ def list_conversations():
 
 @app.post("/conversations")
 def create_conversation_api():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "New chat").strip() or "New chat"
     with DB_LOCK:
@@ -238,12 +324,15 @@ def create_conversation_api():
 
 @app.get("/conversations/<conversation_id>")
 def get_conversation(conversation_id):
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     with DB_LOCK:
         conn = get_db()
         try:
             row = conn.execute(
-                "SELECT id, title, created_at, updated_at FROM conversations WHERE id=?",
-                (conversation_id,),
+                "SELECT id, title, created_at, updated_at FROM conversations WHERE id=? AND user_sub=?",
+                (conversation_id, user_sub),
             ).fetchone()
             if not row:
                 return jsonify({"error": "conversation not found"}), 404
@@ -256,10 +345,15 @@ def get_conversation(conversation_id):
 
 @app.delete("/conversations/<conversation_id>")
 def delete_conversation(conversation_id):
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     with DB_LOCK:
         conn = get_db()
         try:
-            deleted = conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,)).rowcount
+            deleted = conn.execute(
+                "DELETE FROM conversations WHERE id=? AND user_sub=?", (conversation_id, user_sub)
+            ).rowcount
             conn.commit()
             if not deleted:
                 return jsonify({"error": "conversation not found"}), 404
@@ -270,6 +364,9 @@ def delete_conversation(conversation_id):
 
 @app.post("/chat")
 def chat_api():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     data = request.get_json(silent=True) or {}
     user_text = (data.get("message") or "").strip()
     conversation_id = (data.get("conversation_id") or "").strip()
@@ -287,7 +384,8 @@ def chat_api():
         try:
             if conversation_id:
                 row = conn.execute(
-                    "SELECT id, title FROM conversations WHERE id=?", (conversation_id,)
+                    "SELECT id, title FROM conversations WHERE id=? AND user_sub=?",
+                    (conversation_id, user_sub),
                 ).fetchone()
                 if not row:
                     return jsonify({"error": "conversation not found"}), 404
@@ -356,11 +454,17 @@ def chat_api():
 
 @app.post("/reset")
 def reset_chat():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
     with DB_LOCK:
         conn = get_db()
         try:
-            conn.execute("DELETE FROM messages")
-            conn.execute("DELETE FROM conversations")
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_sub=?)",
+                (user_sub,),
+            )
+            conn.execute("DELETE FROM conversations WHERE user_sub=?", (user_sub,))
             conn.commit()
             return jsonify({"ok": True})
         finally:

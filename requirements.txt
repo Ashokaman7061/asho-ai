@@ -2,3 +2,4 @@ flask
 ollama
 gunicorn
 httpx
+google-auth
