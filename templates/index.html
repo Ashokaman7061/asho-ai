@@ -92,8 +92,8 @@
       box-shadow: 0 20px 50px rgba(0,0,0,.35);
       text-align: left;
     }
-    .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; color: #5c84ff; font-weight: 700; font-size: 2rem; letter-spacing: .2px; }
-    .login-brand img { width: 34px; height: 34px; object-fit: contain; border-radius: 8px; }
+    .login-brand { display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+    .login-brand img { width: min(260px, 70vw); height: auto; object-fit: contain; display: block; }
     .login-title { font-size: 1.1rem; margin: 0 0 6px; text-align: center; }
     .login-sub { margin: 0 0 16px; color: #9ea8be; font-size: 14px; text-align: center; }
     .login-form { display: grid; gap: 10px; }
@@ -344,7 +344,8 @@
     .auth-box { display: flex; align-items: center; gap: 8px; }
     .auth-name { font-size: 12px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
-    .google-anchor { min-width: 180px; min-height: 34px; }
+    .google-wrap { display: flex; justify-content: center; align-items: center; }
+    .google-anchor { min-width: 46px; min-height: 46px; }
     .auth-required { width: 100%; max-width: var(--content-w); margin: 18px auto 0; padding: 0 16px; color: var(--muted); font-size: 14px; }
     .side-bottom .auth-box { margin-top: 8px; flex-wrap: wrap; }
 
@@ -626,7 +627,7 @@
         margin-top: 92px;
       }
       .login-card { padding: 20px 16px; border-radius: 16px; }
-      .login-brand { font-size: 1.6rem; }
+      .login-brand img { width: min(220px, 72vw); }
       .chat-title {
       display: none;
     }
@@ -640,7 +641,6 @@
       <div class="login-card">
         <div class="login-brand">
           <img src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
-          <span>Asho AI</span>
         </div>
         <h2 id="loginTitle" class="login-title">Sign in</h2>
         <p class="login-sub">Use your account to continue to Asho AI chat.</p>
@@ -659,7 +659,9 @@
           <button id="authSwitchBtn" type="button">Create account</button>
         </div>
         <div class="login-divider">OR</div>
-        <div id="googleSignIn" class="google-anchor" {% if not google_client_id %}style="display:none;"{% endif %}></div>
+        <div class="google-wrap">
+          <div id="googleSignIn" class="google-anchor" {% if not google_client_id %}style="display:none;"{% endif %}></div>
+        </div>
       </div>
     </div>
     <aside id="sidebar" class="sidebar closed">
@@ -914,9 +916,11 @@
         callback: (resp) => handleGoogleCredential(resp.credential),
       });
       window.google.accounts.id.renderButton(googleSignInEl, {
+        type: "icon",
         theme: "outline",
-        size: "medium",
-        width: 210,
+        shape: "circle",
+        size: "large",
+        text: "signin_with",
       });
     }
 
