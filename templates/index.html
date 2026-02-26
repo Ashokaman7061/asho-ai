@@ -273,6 +273,7 @@
     .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
     .google-anchor { min-width: 180px; min-height: 34px; }
     .auth-required { width: 100%; max-width: var(--content-w); margin: 18px auto 0; padding: 0 16px; color: var(--muted); font-size: 14px; }
+    .side-bottom .auth-box { margin-top: 8px; flex-wrap: wrap; }
 
     .mobile-toggle {
       display: none;
@@ -582,10 +583,11 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke-linecap="round"/></svg>
           <span class="hidden-when-collapsed">Settings</span>
         </button>
-        <button class="bottom-btn" type="button">
-          <span class="profile-dot">A</span>
-          <span class="hidden-when-collapsed">Ashok Aman</span>
-        </button>
+        <div id="authBox" class="auth-box hidden-when-collapsed">
+          <span id="authName" class="auth-name" style="display:none;"></span>
+          <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
+          <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
+        </div>
       </div>
     </aside>
 
@@ -604,11 +606,6 @@
         <div class="chat-title" id="chatTitle">Asho AI</div>
 
         <div class="header-right">
-          <div id="authBox" class="auth-box">
-            <span id="authName" class="auth-name" style="display:none;"></span>
-            <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
-            <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
-          </div>
           <button id="themeToggle" class="header-action" type="button" aria-label="Toggle theme">
             <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
           </button>
