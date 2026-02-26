@@ -11,6 +11,7 @@ import httpx
 from flask import Flask, Response, jsonify, render_template, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__, static_folder="static", static_url_path="/assets")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -23,6 +24,7 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
@@ -65,6 +67,15 @@ def init_db():
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT,
+                    display_name TEXT,
+                    provider TEXT NOT NULL DEFAULT 'local',
+                    provider_sub TEXT,
+                    created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,11 +213,11 @@ def get_conversation_messages(conn, conversation_id):
 
 
 def is_auth_enabled():
-    return bool(GOOGLE_CLIENT_ID)
+    return AUTH_REQUIRED
 
 
 def current_user_sub():
-    if not is_auth_enabled():
+    if not AUTH_REQUIRED:
         return "public"
     user = session.get("user")
     if not user:
@@ -221,6 +232,10 @@ def require_user():
     return None
 
 
+def session_user_payload(user_sub, email=None, name=None, provider="local"):
+    return {"sub": user_sub, "email": email, "name": name, "provider": provider}
+
+
 @app.get("/")
 def index():
     return render_template(
@@ -228,6 +243,7 @@ def index():
         model=MODEL_NAME,
         google_client_id=GOOGLE_CLIENT_ID,
         auth_enabled=is_auth_enabled(),
+        google_enabled=bool(GOOGLE_CLIENT_ID),
     )
 
 
@@ -239,7 +255,7 @@ def auth_me():
 
 @app.post("/auth/google")
 def auth_google():
-    if not is_auth_enabled():
+    if not GOOGLE_CLIENT_ID:
         return jsonify({"error": "google auth disabled"}), 503
     payload = request.get_json(silent=True) or {}
     credential = (payload.get("credential") or "").strip()
@@ -252,12 +268,111 @@ def auth_google():
     except Exception as exc:
         app.logger.warning("google token verify failed: %s", exc)
         return jsonify({"error": "invalid google token"}), 401
-    session["user"] = {
-        "sub": info.get("sub"),
-        "email": info.get("email"),
-        "name": info.get("name"),
-        "picture": info.get("picture"),
-    }
+    provider_sub = info.get("sub")
+    email = (info.get("email") or "").strip().lower()
+    name = info.get("name")
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT id FROM users WHERE provider='google' AND provider_sub=?",
+                (provider_sub,),
+            ).fetchone()
+            if not row and email:
+                row = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+                if row:
+                    conn.execute(
+                        "UPDATE users SET provider='google', provider_sub=?, display_name=? WHERE id=?",
+                        (provider_sub, name, row["id"]),
+                    )
+            if not row:
+                now = utc_now_iso()
+                conn.execute(
+                    """
+                    INSERT INTO users (email, password_hash, display_name, provider, provider_sub, created_at)
+                    VALUES (?, NULL, ?, 'google', ?, ?)
+                    """,
+                    (email or f"google_{provider_sub}@example.local", name, provider_sub, now),
+                )
+                user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            else:
+                user_id = row["id"]
+            conn.commit()
+        finally:
+            conn.close()
+    session["user"] = session_user_payload(
+        f"user:{user_id}",
+        email=email,
+        name=name,
+        provider="google",
+    )
+    return jsonify({"ok": True, "user": session["user"]})
+
+
+@app.post("/auth/register")
+def auth_register():
+    payload = request.get_json(silent=True) or {}
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    name = (payload.get("name") or "").strip()
+    if "@" not in email or len(email) > 254:
+        return jsonify({"error": "valid email is required"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
+    password_hash = generate_password_hash(password)
+    now = utc_now_iso()
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+            if existing:
+                return jsonify({"error": "email already registered"}), 409
+            conn.execute(
+                """
+                INSERT INTO users (email, password_hash, display_name, provider, provider_sub, created_at)
+                VALUES (?, ?, ?, 'local', NULL, ?)
+                """,
+                (email, password_hash, name or email.split("@")[0], now),
+            )
+            user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+    session["user"] = session_user_payload(
+        f"user:{user_id}",
+        email=email,
+        name=name or email.split("@")[0],
+        provider="local",
+    )
+    return jsonify({"ok": True, "user": session["user"]})
+
+
+@app.post("/auth/login")
+def auth_login():
+    payload = request.get_json(silent=True) or {}
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    if "@" not in email:
+        return jsonify({"error": "valid email is required"}), 400
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT id, password_hash, display_name, provider FROM users WHERE email=?",
+                (email,),
+            ).fetchone()
+        finally:
+            conn.close()
+    if not row or not row["password_hash"]:
+        return jsonify({"error": "invalid email or password"}), 401
+    if not check_password_hash(row["password_hash"], password):
+        return jsonify({"error": "invalid email or password"}), 401
+    session["user"] = session_user_payload(
+        f"user:{row['id']}",
+        email=email,
+        name=row["display_name"] or email.split("@")[0],
+        provider=row["provider"] or "local",
+    )
     return jsonify({"ok": True, "user": session["user"]})
 
 

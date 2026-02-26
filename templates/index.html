@@ -86,14 +86,43 @@
     .login-card {
       width: min(520px, 92vw);
       border: 1px solid var(--border);
-      background: var(--panel);
-      border-radius: 18px;
-      padding: 22px 20px;
+      background: #12141c;
+      border-radius: 22px;
+      padding: 26px 22px;
       box-shadow: 0 20px 50px rgba(0,0,0,.35);
-      text-align: center;
+      text-align: left;
     }
-    .login-title { font-size: 1.15rem; margin: 0 0 8px; }
-    .login-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+    .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; color: #5c84ff; font-weight: 700; font-size: 2rem; letter-spacing: .2px; }
+    .login-brand img { width: 34px; height: 34px; object-fit: contain; border-radius: 8px; }
+    .login-title { font-size: 1.1rem; margin: 0 0 6px; text-align: center; }
+    .login-sub { margin: 0 0 16px; color: #9ea8be; font-size: 14px; text-align: center; }
+    .login-form { display: grid; gap: 10px; }
+    .login-input {
+      width: 100%;
+      border: 1px solid #2b3040;
+      border-radius: 999px;
+      background: #171b26;
+      color: #e8ecf8;
+      padding: 12px 14px;
+      font-size: 15px;
+      outline: none;
+    }
+    .login-input:focus { border-color: #4f79ff; box-shadow: 0 0 0 3px rgba(79,121,255,.16); }
+    .login-primary {
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #5d89ff 0%, #4f79ff 100%);
+      color: #fff;
+      font-weight: 600;
+      font-size: 18px;
+      padding: 12px 14px;
+      cursor: pointer;
+    }
+    .login-meta { margin-top: 10px; color: #94a1bc; font-size: 13px; text-align: center; min-height: 18px; }
+    .login-switch { margin-top: 8px; text-align: center; font-size: 14px; color: #9ea8be; }
+    .login-switch button { border: 0; background: transparent; color: #6f95ff; cursor: pointer; font-size: 14px; }
+    .login-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 8px; color: #7f8aaa; font-size: 12px; }
+    .login-divider::before, .login-divider::after { content: ""; flex: 1; height: 1px; background: #2b3040; }
 
     .overlay {
       position: fixed;
@@ -590,9 +619,25 @@
   <div class="layout">
     <div id="loginGate" class="login-gate">
       <div class="login-card">
-        <h2 class="login-title">Sign in to continue</h2>
-        <p class="login-sub">Google se login karo, phir Asho AI chat open ho jayega.</p>
-        <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
+        <div class="login-brand">
+          <img src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
+          <span>Asho AI</span>
+        </div>
+        <h2 id="loginTitle" class="login-title">Sign in</h2>
+        <p class="login-sub">Use your account to continue to Asho AI chat.</p>
+        <form id="authForm" class="login-form">
+          <input id="authNameInput" class="login-input" type="text" placeholder="Full name (for sign up)" style="display:none;" />
+          <input id="authEmailInput" class="login-input" type="email" placeholder="Email address" autocomplete="email" />
+          <input id="authPasswordInput" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
+          <button id="authSubmitBtn" class="login-primary" type="submit">Sign in</button>
+        </form>
+        <div id="authMessage" class="login-meta"></div>
+        <div class="login-switch">
+          <span id="authSwitchText">New here?</span>
+          <button id="authSwitchBtn" type="button">Create account</button>
+        </div>
+        <div class="login-divider">OR</div>
+        <div id="googleSignIn" class="google-anchor" {% if not google_client_id %}style="display:none;"{% endif %}></div>
       </div>
     </div>
     <aside id="sidebar" class="sidebar closed">
@@ -649,7 +694,7 @@
         <div id="welcomePanel" class="welcome-panel">
           <img class="welcome-mark" src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
         </div>
-        <div id="authRequired" class="auth-required" style="display:none;">Please sign in with Google to start chatting.</div>
+        <div id="authRequired" class="auth-required" style="display:none;">Please sign in to start chatting.</div>
       </section>
 
       <div class="input-bar">
@@ -679,6 +724,15 @@
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
     const authName = document.getElementById("authName");
+    const authForm = document.getElementById("authForm");
+    const authNameInput = document.getElementById("authNameInput");
+    const authEmailInput = document.getElementById("authEmailInput");
+    const authPasswordInput = document.getElementById("authPasswordInput");
+    const authSubmitBtn = document.getElementById("authSubmitBtn");
+    const authMessage = document.getElementById("authMessage");
+    const authSwitchBtn = document.getElementById("authSwitchBtn");
+    const authSwitchText = document.getElementById("authSwitchText");
+    const loginTitle = document.getElementById("loginTitle");
     const googleSignInEl = document.getElementById("googleSignIn");
     const logoutBtn = document.getElementById("logoutBtn");
     const authRequired = document.getElementById("authRequired");
@@ -698,11 +752,24 @@
     let chats = [];
     let activeChatId = null;
     let currentUser = null;
+    let authMode = "signin";
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
     function isMobile() {
       return window.matchMedia("(max-width: 900px)").matches;
+    }
+
+    function setAuthMode(mode) {
+      authMode = mode === "signup" ? "signup" : "signin";
+      const signUp = authMode === "signup";
+      loginTitle.textContent = signUp ? "Create account" : "Sign in";
+      authNameInput.style.display = signUp ? "block" : "none";
+      authPasswordInput.autocomplete = signUp ? "new-password" : "current-password";
+      authSubmitBtn.textContent = signUp ? "Create account" : "Sign in";
+      authSwitchText.textContent = signUp ? "Already have an account?" : "New here?";
+      authSwitchBtn.textContent = signUp ? "Sign in" : "Create account";
+      authMessage.textContent = "";
     }
 
     async function apiJson(url, options = {}) {
@@ -773,6 +840,41 @@
       const payload = await res.json();
       updateAuthUI(payload.user || null);
       await loadConversations(null, { autoSelectExisting: false }).catch(() => {});
+    }
+
+    async function submitAuthForm(e) {
+      e.preventDefault();
+      const email = authEmailInput.value.trim();
+      const password = authPasswordInput.value;
+      const name = authNameInput.value.trim();
+      if (!email || !password) {
+        authMessage.textContent = "Email and password are required.";
+        return;
+      }
+      const url = authMode === "signup" ? "/auth/register" : "/auth/login";
+      const body = authMode === "signup" ? { email, password, name } : { email, password };
+      authSubmitBtn.disabled = true;
+      authMessage.textContent = "Please wait...";
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          authMessage.textContent = payload.error || "Authentication failed.";
+          return;
+        }
+        updateAuthUI(payload.user || null);
+        authMessage.textContent = "";
+        authEmailInput.value = "";
+        authPasswordInput.value = "";
+        authNameInput.value = "";
+        await loadConversations(null, { autoSelectExisting: false }).catch(() => {});
+      } finally {
+        authSubmitBtn.disabled = false;
+      }
     }
 
     function initGoogleSignIn() {
@@ -1071,6 +1173,10 @@
       const current = document.body.getAttribute("data-theme") === "light" ? "light" : "dark";
       applyTheme(current === "light" ? "dark" : "light");
     });
+    authSwitchBtn.addEventListener("click", () => {
+      setAuthMode(authMode === "signin" ? "signup" : "signin");
+    });
+    authForm.addEventListener("submit", submitAuthForm);
     logoutBtn.addEventListener("click", async () => {
       await fetch("/auth/logout", { method: "POST" }).catch(() => {});
       updateAuthUI(null);
@@ -1175,6 +1281,7 @@
     }
 
     initTheme();
+    setAuthMode("signin");
     autoResize();
     loadAuthState().then(() => {
       if (AUTH_ENABLED && !currentUser) return;
