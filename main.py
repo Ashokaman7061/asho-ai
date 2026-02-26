@@ -75,10 +75,12 @@ def init_db():
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
-                CREATE INDEX IF NOT EXISTS idx_conversations_user_sub ON conversations(user_sub);
                 """
             )
             ensure_schema_columns(conn)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_user_sub ON conversations(user_sub)"
+            )
             migrate_legacy_json_if_needed(conn)
             conn.commit()
         finally:
