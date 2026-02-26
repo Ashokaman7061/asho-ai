@@ -3,3 +3,4 @@ ollama
 gunicorn
 httpx
 google-auth
+requests
