@@ -342,12 +342,79 @@
       gap: 8px;
     }
     .auth-box { display: flex; align-items: center; gap: 8px; }
-    .auth-name { font-size: 12px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .auth-name { font-size: 12px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
     .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
     .google-wrap { display: flex; justify-content: center; align-items: center; }
     .google-anchor { min-width: 46px; min-height: 46px; }
     .auth-required { width: 100%; max-width: var(--content-w); margin: 18px auto 0; padding: 0 16px; color: var(--muted); font-size: 14px; }
     .side-bottom .auth-box { margin-top: 8px; flex-wrap: wrap; }
+    .user-menu {
+      position: absolute;
+      right: 12px;
+      bottom: 56px;
+      min-width: 170px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.28);
+      padding: 6px;
+      z-index: 40;
+      display: none;
+    }
+    .user-menu.open { display: block; }
+    .menu-item {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .menu-item:hover { background: var(--hover); }
+    .settings-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      z-index: 70;
+      background: rgba(0,0,0,.55);
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .settings-modal.open { display: flex; }
+    .settings-card {
+      width: min(820px, 96vw);
+      max-height: 86vh;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--panel);
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      overflow: hidden;
+    }
+    .settings-nav { border-right: 1px solid var(--border); padding: 10px; background: var(--panel-2); }
+    .settings-tab {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      padding: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .settings-tab.active, .settings-tab:hover { background: var(--hover); color: var(--text); }
+    .settings-content { padding: 16px; overflow: auto; }
+    .settings-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .settings-title { margin: 0; font-size: 1.05rem; }
+    .settings-close { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
+    .settings-pane { display: none; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .settings-pane.active { display: block; }
 
     .mobile-toggle {
       display: none;
@@ -690,6 +757,11 @@
           <span id="authName" class="auth-name" style="display:none;"></span>
           <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
         </div>
+        <div id="userMenu" class="user-menu">
+          <button id="menuSettings" class="menu-item" type="button">Settings</button>
+          <button id="menuHelp" class="menu-item" type="button">Help</button>
+          <button id="menuLogout" class="menu-item" type="button">Logout</button>
+        </div>
       </div>
     </aside>
 
@@ -734,6 +806,34 @@
       </div>
     </main>
   </div>
+  <div id="settingsModal" class="settings-modal">
+    <div class="settings-card">
+      <div class="settings-nav">
+        <button class="settings-tab active" data-tab="general" type="button">General</button>
+        <button class="settings-tab" data-tab="profile" type="button">Profile</button>
+        <button class="settings-tab" data-tab="data" type="button">Data</button>
+        <button class="settings-tab" data-tab="about" type="button">About</button>
+      </div>
+      <div class="settings-content">
+        <div class="settings-head">
+          <h3 class="settings-title">Settings</h3>
+          <button id="settingsClose" class="settings-close" type="button" aria-label="Close settings">x</button>
+        </div>
+        <div id="paneGeneral" class="settings-pane active">
+          Theme and interface preferences will appear here.
+        </div>
+        <div id="paneProfile" class="settings-pane">
+          Profile details for your account will appear here.
+        </div>
+        <div id="paneData" class="settings-pane">
+          Conversation export and delete controls can be added here.
+        </div>
+        <div id="paneAbout" class="settings-pane">
+          Asho AI - your personal AI assistant platform.
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     const sidebar = document.getElementById("sidebar");
@@ -748,6 +848,17 @@
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
     const authName = document.getElementById("authName");
+    const userMenu = document.getElementById("userMenu");
+    const menuSettings = document.getElementById("menuSettings");
+    const menuHelp = document.getElementById("menuHelp");
+    const menuLogout = document.getElementById("menuLogout");
+    const settingsModal = document.getElementById("settingsModal");
+    const settingsClose = document.getElementById("settingsClose");
+    const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+    const paneGeneral = document.getElementById("paneGeneral");
+    const paneProfile = document.getElementById("paneProfile");
+    const paneData = document.getElementById("paneData");
+    const paneAbout = document.getElementById("paneAbout");
     const authForm = document.getElementById("authForm");
     const authNameInput = document.getElementById("authNameInput");
     const authEmailInput = document.getElementById("authEmailInput");
@@ -796,6 +907,28 @@
       authSwitchBtn.textContent = signUp ? "Sign in" : "Create account";
       authMessage.textContent = "";
       authMessage.className = "login-meta";
+    }
+
+    function toggleUserMenu(show) {
+      userMenu.classList.toggle("open", show ?? !userMenu.classList.contains("open"));
+    }
+
+    function openSettings(tab = "general") {
+      settingsModal.classList.add("open");
+      setSettingsTab(tab);
+      toggleUserMenu(false);
+    }
+
+    function closeSettings() {
+      settingsModal.classList.remove("open");
+    }
+
+    function setSettingsTab(tab) {
+      settingsTabs.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
+      paneGeneral.classList.toggle("active", tab === "general");
+      paneProfile.classList.toggle("active", tab === "profile");
+      paneData.classList.toggle("active", tab === "data");
+      paneAbout.classList.toggle("active", tab === "about");
     }
 
     async function apiJson(url, options = {}) {
@@ -1224,6 +1357,33 @@
       refreshWelcome();
       renderHistory();
     });
+    authName.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!currentUser) return;
+      toggleUserMenu();
+    });
+    menuSettings.addEventListener("click", () => openSettings("general"));
+    menuHelp.addEventListener("click", () => {
+      toggleUserMenu(false);
+      openSettings("about");
+    });
+    menuLogout.addEventListener("click", async () => {
+      toggleUserMenu(false);
+      await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+      updateAuthUI(null);
+      activeChatId = null;
+      clearMessages();
+      refreshWelcome();
+      renderHistory();
+    });
+    settingsClose.addEventListener("click", closeSettings);
+    settingsModal.addEventListener("click", (e) => {
+      if (e.target === settingsModal) closeSettings();
+    });
+    settingsTabs.forEach((btn) => {
+      btn.addEventListener("click", () => setSettingsTab(btn.dataset.tab));
+    });
+    document.addEventListener("click", () => toggleUserMenu(false));
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
