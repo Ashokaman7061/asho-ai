@@ -21,7 +21,6 @@ Copy-Item .env.example .env
 4. Set environment variables.
 ```powershell
 $env:FLASK_DEBUG="1"
-$env:RESET_TOKEN="change-me"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
 ```
@@ -40,7 +39,6 @@ python main.py
 - Start Command: `gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120`
 4. Add environment variables in Render:
 - `FLASK_DEBUG=0`
-- `RESET_TOKEN=<strong-random-secret>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
 - `MAX_MESSAGE_CHARS=4000`

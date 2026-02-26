@@ -16,7 +16,6 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-RESET_TOKEN = os.getenv("RESET_TOKEN", "").strip()
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
@@ -357,11 +356,6 @@ def chat_api():
 
 @app.post("/reset")
 def reset_chat():
-    if not RESET_TOKEN:
-        return jsonify({"error": "reset is disabled"}), 503
-    provided_token = (request.headers.get("X-Reset-Token") or "").strip()
-    if provided_token != RESET_TOKEN:
-        return jsonify({"error": "unauthorized"}), 403
     with DB_LOCK:
         conn = get_db()
         try:
