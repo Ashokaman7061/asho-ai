@@ -5,12 +5,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from flask import Flask, Response, jsonify, render_template, request
-from ollama import chat
 
 app = Flask(__name__, static_folder="static", static_url_path="/assets")
 
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 RESET_TOKEN = os.getenv("RESET_TOKEN", "").strip()
 SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
@@ -73,6 +75,33 @@ def create_conversation(data, title="New chat"):
     }
     data["conversations"].insert(0, convo)
     return convo
+
+
+def get_ollama_chat_url():
+    if OLLAMA_BASE_URL:
+        return OLLAMA_BASE_URL.rstrip("/") + "/chat"
+    if OLLAMA_API_KEY:
+        return "https://ollama.com/api/chat"
+    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+    return host + "/api/chat"
+
+
+def stream_ollama_chat(messages):
+    url = get_ollama_chat_url()
+    headers = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+    payload = {"model": MODEL_NAME, "messages": messages, "stream": True}
+
+    with httpx.stream("POST", url, json=payload, headers=headers, timeout=120.0) as res:
+        res.raise_for_status()
+        for line in res.iter_lines():
+            if not line:
+                continue
+            part = json.loads(line)
+            token = part.get("message", {}).get("content")
+            if token:
+                yield token
 
 
 @app.get("/")
@@ -177,10 +206,12 @@ def chat_api():
     def generate():
         full_text = []
         try:
-            for part in chat(model=MODEL_NAME, messages=model_messages, stream=True):
-                token = part["message"]["content"]
+            for token in stream_ollama_chat(model_messages):
                 full_text.append(token)
                 yield token
+        except Exception:
+            if not full_text:
+                yield "Request failed. Please check model/API configuration."
         finally:
             if full_text:
                 with STORE_LOCK:

@@ -1,3 +1,4 @@
 flask
 ollama
 gunicorn
+httpx

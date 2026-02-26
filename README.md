@@ -18,6 +18,7 @@ pip install -r requirements.txt
 $env:FLASK_DEBUG="1"
 $env:RESET_TOKEN="change-me"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
+$env:OLLAMA_API_KEY=""
 ```
 
 4. Run app.
@@ -36,13 +37,11 @@ python main.py
 - `FLASK_DEBUG=0`
 - `RESET_TOKEN=<strong-random-secret>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
+- `OLLAMA_API_KEY=<your-ollama-api-key>`
 5. Deploy and open generated `onrender.com` URL.
 6. Optional custom domain: add domain in Render settings and configure DNS records.
 
 ## Important Note About Ollama
 
-This app uses `ollama.chat`. If Ollama model runtime is not reachable from your deployed server, chat responses will fail.
-
-For production, use one of these:
-- Host Ollama on the same server with enough CPU/GPU/RAM.
-- Or switch to a hosted LLM API backend.
+If `OLLAMA_API_KEY` is set, app uses Ollama Cloud API (`https://ollama.com/api/chat` by default).
+If API key is empty, app uses local/remote Ollama host via `OLLAMA_HOST` (default `http://127.0.0.1:11434`).
