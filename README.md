@@ -22,7 +22,6 @@ Copy-Item .env.example .env
 ```powershell
 $env:FLASK_DEBUG="1"
 $env:RESET_TOKEN="change-me"
-$env:APP_ACCESS_TOKEN="change-me-app-token"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
 ```
@@ -42,7 +41,6 @@ python main.py
 4. Add environment variables in Render:
 - `FLASK_DEBUG=0`
 - `RESET_TOKEN=<strong-random-secret>`
-- `APP_ACCESS_TOKEN=<strong-app-token>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
 - `MAX_MESSAGE_CHARS=4000`

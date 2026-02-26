@@ -17,7 +17,6 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 RESET_TOKEN = os.getenv("RESET_TOKEN", "").strip()
-APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "").strip()
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
@@ -155,24 +154,6 @@ def is_rate_limited(ip):
         recent.append(now_ts)
         RATE_LIMIT_STATE[ip] = recent
         return False
-
-
-def auth_failed():
-    return jsonify({"error": "unauthorized"}), 401
-
-
-@app.before_request
-def require_access_token():
-    if request.path.startswith("/assets/"):
-        return None
-    if request.path == "/" or request.path == "/health":
-        return None
-    if not APP_ACCESS_TOKEN:
-        return None
-    provided = (request.headers.get("X-App-Token") or "").strip()
-    if provided != APP_ACCESS_TOKEN:
-        return auth_failed()
-    return None
 
 
 def create_conversation(conn, title="New chat"):

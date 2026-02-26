@@ -596,12 +596,6 @@
         <div class="chat-title" id="chatTitle">Asho AI</div>
 
         <div class="header-right">
-          <button id="accessTokenBtn" class="header-action" type="button" aria-label="Set access token" title="Set access token">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="10" rx="2"></rect>
-              <path d="M7 11V8a5 5 0 0 1 10 0v3" stroke-linecap="round"></path>
-            </svg>
-          </button>
           <button id="themeToggle" class="header-action" type="button" aria-label="Toggle theme">
             <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
           </button>
@@ -638,7 +632,6 @@
     const historyEl = document.getElementById("history");
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
-    const accessTokenBtn = document.getElementById("accessTokenBtn");
     const themeToggle = document.getElementById("themeToggle");
     const themeIcon = document.getElementById("themeIcon");
 
@@ -655,54 +648,20 @@
     let chats = [];
     let activeChatId = null;
 
-    function getAppToken() {
-      return (localStorage.getItem("app_token") || "").trim();
-    }
-
-    function setAppTokenPrompt() {
-      const existing = getAppToken();
-      const next = prompt("Set app access token (leave empty to clear):", existing);
-      if (next === null) return;
-      const trimmed = next.trim();
-      if (trimmed) {
-        localStorage.setItem("app_token", trimmed);
-      } else {
-        localStorage.removeItem("app_token");
-      }
-    }
-
-    function withAuthHeaders(headers = {}) {
-      const token = getAppToken();
-      if (token) headers["X-App-Token"] = token;
-      return headers;
-    }
-
     function isMobile() {
       return window.matchMedia("(max-width: 900px)").matches;
     }
 
     async function apiJson(url, options = {}) {
-      const opts = { ...options };
-      opts.headers = withAuthHeaders({ ...(options.headers || {}) });
-      const res = await fetch(url, opts);
+      const res = await fetch(url, options);
       let payload = {};
       try {
         payload = await res.json();
       } catch {}
       if (!res.ok) {
-        const err = new Error(payload.error || "Request failed.");
-        err.status = res.status;
-        throw err;
+        throw new Error(payload.error || "Request failed.");
       }
       return payload;
-    }
-
-    async function ensureAuthToken() {
-      if (getAppToken()) return true;
-      const token = prompt("Enter app access token:");
-      if (!token) return false;
-      localStorage.setItem("app_token", token.trim());
-      return true;
     }
 
     function updateChatMeta(id, title) {
@@ -987,10 +946,6 @@
       const current = document.body.getAttribute("data-theme") === "light" ? "light" : "dark";
       applyTheme(current === "light" ? "dark" : "light");
     });
-    accessTokenBtn.addEventListener("click", async () => {
-      setAppTokenPrompt();
-      await loadConversations(null, { autoSelectExisting: false }).catch(() => {});
-    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1018,7 +973,7 @@
 
         const res = await fetch("/chat", {
           method: "POST",
-          headers: withAuthHeaders({ "Content-Type": "application/json" }),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
@@ -1087,14 +1042,7 @@
 
     initTheme();
     autoResize();
-    loadConversations(null, { autoSelectExisting: false }).catch(async (err) => {
-      if (err?.status === 401) {
-        const ok = await ensureAuthToken();
-        if (ok) {
-          loadConversations(null, { autoSelectExisting: false }).catch(() => {});
-          return;
-        }
-      }
+    loadConversations(null, { autoSelectExisting: false }).catch(() => {
       chatTitle.textContent = "Asho AI";
       clearMessages();
       refreshWelcome();
