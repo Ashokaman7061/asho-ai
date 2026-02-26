@@ -67,6 +67,33 @@
       display: flex;
       position: relative;
     }
+    .login-gate {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      background: color-mix(in srgb, var(--bg) 82%, #000 18%);
+      z-index: 60;
+      padding: 16px;
+    }
+    .layout.auth-locked .login-gate { display: grid; }
+    .layout.auth-locked .sidebar,
+    .layout.auth-locked .main {
+      filter: blur(2px);
+      pointer-events: none;
+      user-select: none;
+    }
+    .login-card {
+      width: min(520px, 92vw);
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 18px;
+      padding: 22px 20px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.35);
+      text-align: center;
+    }
+    .login-title { font-size: 1.15rem; margin: 0 0 8px; }
+    .login-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
 
     .overlay {
       position: fixed;
@@ -561,6 +588,13 @@
 <body>
   <div id="overlay" class="overlay"></div>
   <div class="layout">
+    <div id="loginGate" class="login-gate">
+      <div class="login-card">
+        <h2 class="login-title">Sign in to continue</h2>
+        <p class="login-sub">Google se login karo, phir Asho AI chat open ho jayega.</p>
+        <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
+      </div>
+    </div>
     <aside id="sidebar" class="sidebar closed">
       <div class="side-top">
         <button id="newChat" class="new-chat-btn" type="button">
@@ -585,7 +619,6 @@
         </button>
         <div id="authBox" class="auth-box hidden-when-collapsed">
           <span id="authName" class="auth-name" style="display:none;"></span>
-          <div id="googleSignIn" class="google-anchor" {% if not auth_enabled %}style="display:none;"{% endif %}></div>
           <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
         </div>
       </div>
@@ -636,6 +669,8 @@
   <script>
     const sidebar = document.getElementById("sidebar");
     const overlay = document.getElementById("overlay");
+    const layout = document.querySelector(".layout");
+    const loginGate = document.getElementById("loginGate");
     const collapseBtn = document.getElementById("collapseBtn");
     const desktopClosedToggle = document.getElementById("desktopClosedToggle");
     const mobileToggle = document.getElementById("mobileToggle");
@@ -688,6 +723,8 @@
 
     function showAuthRequired(show) {
       authRequired.style.display = show ? "block" : "none";
+      layout.classList.toggle("auth-locked", show);
+      loginGate.style.display = show ? "grid" : "none";
       input.disabled = show;
       sendBtn.disabled = show;
       newChatBtn.disabled = show;
