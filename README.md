@@ -13,15 +13,21 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-3. Set environment variables.
+3. Create env file from template.
+```powershell
+Copy-Item .env.example .env
+```
+
+4. Set environment variables.
 ```powershell
 $env:FLASK_DEBUG="1"
 $env:RESET_TOKEN="change-me"
+$env:APP_ACCESS_TOKEN="change-me-app-token"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
 ```
 
-4. Run app.
+5. Run app.
 ```powershell
 python main.py
 ```
@@ -36,8 +42,12 @@ python main.py
 4. Add environment variables in Render:
 - `FLASK_DEBUG=0`
 - `RESET_TOKEN=<strong-random-secret>`
+- `APP_ACCESS_TOKEN=<strong-app-token>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
+- `MAX_MESSAGE_CHARS=4000`
+- `RATE_LIMIT_WINDOW_SECONDS=60`
+- `RATE_LIMIT_MAX_REQUESTS=20`
 5. Deploy and open generated `onrender.com` URL.
 6. Optional custom domain: add domain in Render settings and configure DNS records.
 
@@ -45,3 +55,8 @@ python main.py
 
 If `OLLAMA_API_KEY` is set, app uses Ollama Cloud API (`https://ollama.com/api/chat` by default).
 If API key is empty, app uses local/remote Ollama host via `OLLAMA_HOST` (default `http://127.0.0.1:11434`).
+
+## Storage
+
+Conversations are stored in SQLite: `data/conversations.db`.
+On first startup, legacy `data/conversations.json` data is auto-migrated.
