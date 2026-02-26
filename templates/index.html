@@ -97,6 +97,7 @@
     .login-title { font-size: 1.1rem; margin: 0 0 6px; text-align: center; }
     .login-sub { margin: 0 0 16px; color: #9ea8be; font-size: 14px; text-align: center; }
     .login-form { display: grid; gap: 10px; }
+    .password-wrap { position: relative; }
     .login-input {
       width: 100%;
       border: 1px solid #2b3040;
@@ -108,6 +109,19 @@
       outline: none;
     }
     .login-input:focus { border-color: #4f79ff; box-shadow: 0 0 0 3px rgba(79,121,255,.16); }
+    .password-wrap .login-input { padding-right: 48px; }
+    .pass-toggle {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: #9ea8be;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 6px;
+    }
     .login-primary {
       border: 0;
       border-radius: 999px;
@@ -118,7 +132,10 @@
       padding: 12px 14px;
       cursor: pointer;
     }
+    .login-primary:disabled { opacity: .7; cursor: not-allowed; }
     .login-meta { margin-top: 10px; color: #94a1bc; font-size: 13px; text-align: center; min-height: 18px; }
+    .login-meta.error { color: #ff8f98; }
+    .login-meta.success { color: #8fd8a7; }
     .login-switch { margin-top: 8px; text-align: center; font-size: 14px; color: #9ea8be; }
     .login-switch button { border: 0; background: transparent; color: #6f95ff; cursor: pointer; font-size: 14px; }
     .login-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 8px; color: #7f8aaa; font-size: 12px; }
@@ -608,6 +625,8 @@
       .welcome-panel {
         margin-top: 92px;
       }
+      .login-card { padding: 20px 16px; border-radius: 16px; }
+      .login-brand { font-size: 1.6rem; }
       .chat-title {
       display: none;
     }
@@ -628,7 +647,10 @@
         <form id="authForm" class="login-form">
           <input id="authNameInput" class="login-input" type="text" placeholder="Full name (for sign up)" style="display:none;" />
           <input id="authEmailInput" class="login-input" type="email" placeholder="Email address" autocomplete="email" />
-          <input id="authPasswordInput" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
+          <div class="password-wrap">
+            <input id="authPasswordInput" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
+            <button id="passToggleBtn" class="pass-toggle" type="button" aria-label="Show password">Show</button>
+          </div>
           <button id="authSubmitBtn" class="login-primary" type="submit">Sign in</button>
         </form>
         <div id="authMessage" class="login-meta"></div>
@@ -728,6 +750,7 @@
     const authNameInput = document.getElementById("authNameInput");
     const authEmailInput = document.getElementById("authEmailInput");
     const authPasswordInput = document.getElementById("authPasswordInput");
+    const passToggleBtn = document.getElementById("passToggleBtn");
     const authSubmitBtn = document.getElementById("authSubmitBtn");
     const authMessage = document.getElementById("authMessage");
     const authSwitchBtn = document.getElementById("authSwitchBtn");
@@ -770,6 +793,7 @@
       authSwitchText.textContent = signUp ? "Already have an account?" : "New here?";
       authSwitchBtn.textContent = signUp ? "Sign in" : "Create account";
       authMessage.textContent = "";
+      authMessage.className = "login-meta";
     }
 
     async function apiJson(url, options = {}) {
@@ -854,7 +878,9 @@
       const url = authMode === "signup" ? "/auth/register" : "/auth/login";
       const body = authMode === "signup" ? { email, password, name } : { email, password };
       authSubmitBtn.disabled = true;
+      authSubmitBtn.textContent = authMode === "signup" ? "Creating..." : "Signing in...";
       authMessage.textContent = "Please wait...";
+      authMessage.className = "login-meta";
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -864,16 +890,19 @@
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) {
           authMessage.textContent = payload.error || "Authentication failed.";
+          authMessage.className = "login-meta error";
           return;
         }
         updateAuthUI(payload.user || null);
-        authMessage.textContent = "";
+        authMessage.textContent = "Success. Redirecting...";
+        authMessage.className = "login-meta success";
         authEmailInput.value = "";
         authPasswordInput.value = "";
         authNameInput.value = "";
         await loadConversations(null, { autoSelectExisting: false }).catch(() => {});
       } finally {
         authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = authMode === "signup" ? "Create account" : "Sign in";
       }
     }
 
@@ -1177,6 +1206,12 @@
       setAuthMode(authMode === "signin" ? "signup" : "signin");
     });
     authForm.addEventListener("submit", submitAuthForm);
+    passToggleBtn.addEventListener("click", () => {
+      const visible = authPasswordInput.type === "text";
+      authPasswordInput.type = visible ? "password" : "text";
+      passToggleBtn.textContent = visible ? "Show" : "Hide";
+      passToggleBtn.setAttribute("aria-label", visible ? "Show password" : "Hide password");
+    });
     logoutBtn.addEventListener("click", async () => {
       await fetch("/auth/logout", { method: "POST" }).catch(() => {});
       updateAuthUI(null);
