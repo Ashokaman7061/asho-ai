@@ -69,6 +69,7 @@ def init_db():
                     id TEXT PRIMARY KEY,
                     user_sub TEXT NOT NULL,
                     title TEXT NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -107,6 +108,8 @@ def ensure_schema_columns(conn):
     cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
     if "user_sub" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN user_sub TEXT NOT NULL DEFAULT 'public'")
+    if "pinned" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
     user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "session_nonce" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN session_nonce INTEGER NOT NULL DEFAULT 0")
@@ -221,13 +224,14 @@ def create_conversation(conn, title="New chat"):
         "INSERT INTO conversations (id, user_sub, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         (cid, user_sub, title, now, now),
     )
-    return {"id": cid, "title": title, "created_at": now, "updated_at": now}
+    return {"id": cid, "title": title, "pinned": 0, "created_at": now, "updated_at": now}
 
 
 def conversation_meta_row_to_dict(row):
     return {
         "id": row["id"],
         "title": row["title"] or "New chat",
+        "pinned": int(row["pinned"] or 0),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -239,6 +243,17 @@ def get_conversation_messages(conn, conversation_id):
         (conversation_id,),
     ).fetchall()
     return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
+def build_model_messages_from_conversation(conn, conversation_id):
+    model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
+        conn, conversation_id
+    )
+    realtime_context = (
+        f"Current UTC datetime: {utc_now_iso()}. "
+        "Use this as the authoritative current time reference in this conversation."
+    )
+    return [model_messages[0], {"role": "system", "content": realtime_context}, *model_messages[1:]]
 
 
 def is_auth_enabled():
@@ -527,13 +542,13 @@ def list_conversations():
         try:
             rows = conn.execute(
                 """
-                SELECT c.id, c.title, c.created_at, c.updated_at,
+                SELECT c.id, c.title, c.pinned, c.created_at, c.updated_at,
                        COUNT(m.id) AS message_count
                 FROM conversations c
                 LEFT JOIN messages m ON m.conversation_id = c.id
                 WHERE c.user_sub = ?
                 GROUP BY c.id
-                ORDER BY c.updated_at DESC
+                ORDER BY c.pinned DESC, c.updated_at DESC
                 """,
                 (user_sub,),
             ).fetchall()
@@ -541,6 +556,7 @@ def list_conversations():
                 {
                     "id": r["id"],
                     "title": r["title"] or "New chat",
+                    "pinned": int(r["pinned"] or 0),
                     "created_at": r["created_at"],
                     "updated_at": r["updated_at"],
                     "message_count": int(r["message_count"] or 0),
@@ -607,7 +623,7 @@ def get_conversation(conversation_id):
         conn = get_db()
         try:
             row = conn.execute(
-                "SELECT id, title, created_at, updated_at FROM conversations WHERE id=? AND user_sub=?",
+                "SELECT id, title, pinned, created_at, updated_at FROM conversations WHERE id=? AND user_sub=?",
                 (conversation_id, user_sub),
             ).fetchone()
             if not row:
@@ -617,6 +633,112 @@ def get_conversation(conversation_id):
             return jsonify({"conversation": payload})
         finally:
             conn.close()
+
+
+@app.post("/conversations/<conversation_id>/pin")
+def pin_conversation(conversation_id):
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    data = request.get_json(silent=True) or {}
+    pinned = 1 if bool(data.get("pinned")) else 0
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            updated = conn.execute(
+                "UPDATE conversations SET pinned=?, updated_at=? WHERE id=? AND user_sub=?",
+                (pinned, utc_now_iso(), conversation_id, user_sub),
+            ).rowcount
+            conn.commit()
+            if not updated:
+                return jsonify({"error": "conversation not found"}), 404
+            return jsonify({"ok": True, "pinned": pinned})
+        finally:
+            conn.close()
+
+
+@app.post("/conversations/<conversation_id>/regenerate")
+def regenerate_conversation(conversation_id):
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    data = request.get_json(silent=True) or {}
+    edited_message = (data.get("message") or "").strip()
+    edit_requested = "message" in data
+    if edit_requested and not edited_message:
+        return jsonify({"error": "message is required"}), 400
+    if edited_message and len(edited_message) > MAX_MESSAGE_CHARS:
+        return jsonify({"error": f"message too long (max {MAX_MESSAGE_CHARS} chars)"}), 400
+
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT id, title FROM conversations WHERE id=? AND user_sub=?",
+                (conversation_id, user_sub),
+            ).fetchone()
+            if not row:
+                return jsonify({"error": "conversation not found"}), 404
+            current_title = row["title"] or "New chat"
+            last_user = conn.execute(
+                "SELECT id, content FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+            if not last_user:
+                return jsonify({"error": "no user message found"}), 400
+
+            last_user_id = int(last_user["id"])
+            if edit_requested:
+                conn.execute(
+                    "UPDATE messages SET content=?, created_at=? WHERE id=?",
+                    (edited_message, utc_now_iso(), last_user_id),
+                )
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id=? AND id>?",
+                (conversation_id, last_user_id),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at=? WHERE id=?",
+                (utc_now_iso(), conversation_id),
+            )
+            current_title = maybe_auto_rename_title(conn, conversation_id, current_title)
+            model_messages = build_model_messages_from_conversation(conn, conversation_id)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def generate():
+        full_text = []
+        try:
+            for token in stream_ollama_chat(model_messages):
+                full_text.append(token)
+                yield token
+        except Exception as exc:
+            app.logger.exception("regenerate stream failed: %s", exc)
+            if not full_text:
+                yield "Request failed. Please check model/API configuration."
+        finally:
+            if full_text:
+                with DB_LOCK:
+                    conn = get_db()
+                    try:
+                        now = utc_now_iso()
+                        conn.execute(
+                            "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                            (conversation_id, "assistant", "".join(full_text), now),
+                        )
+                        conn.execute(
+                            "UPDATE conversations SET updated_at=? WHERE id=?",
+                            (now, conversation_id),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+    response = Response(generate(), mimetype="text/plain; charset=utf-8")
+    response.headers["X-Conversation-Id"] = conversation_id
+    response.headers["X-Conversation-Title"] = current_title
+    return response
 
 
 @app.delete("/conversations/<conversation_id>")
@@ -687,18 +809,7 @@ def chat_api():
                 "UPDATE conversations SET updated_at=? WHERE id=?",
                 (now, conversation_id),
             )
-            model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
-                conn, conversation_id
-            )
-            realtime_context = (
-                f"Current UTC datetime: {utc_now_iso()}. "
-                "Use this as the authoritative current time reference in this conversation."
-            )
-            model_messages = [
-                model_messages[0],
-                {"role": "system", "content": realtime_context},
-                *model_messages[1:],
-            ]
+            model_messages = build_model_messages_from_conversation(conn, conversation_id)
             current_title = maybe_auto_rename_title(conn, conversation_id, current_title)
             conn.commit()
         finally:

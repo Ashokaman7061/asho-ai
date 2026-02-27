@@ -260,6 +260,25 @@
       position: relative;
       color: var(--muted);
     }
+    .chat-item-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    .chat-item:hover .chat-item-actions { opacity: 1; }
+    .pin-chat, .delete-chat {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pin-chat.pinned { color: var(--accent); }
 
     .chat-item:hover, .chat-item.active {
       background: var(--hover);
@@ -283,7 +302,6 @@
       transition: opacity .2s ease, color .2s ease;
     }
 
-    .chat-item:hover .delete-chat { opacity: 1; }
     .delete-chat:hover { color: var(--text); }
 
     .side-bottom {
@@ -625,6 +643,10 @@
 
     .message-row.user { justify-content: flex-end; }
     .message-row.assistant { justify-content: flex-start; }
+    .message-row.search-hit .message {
+      outline: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+      border-radius: 10px;
+    }
 
     .message {
       max-width: 85%;
@@ -718,6 +740,26 @@
 
     .typing span:nth-child(2) { animation-delay: .12s; }
     .typing span:nth-child(3) { animation-delay: .24s; }
+    .tool-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 7px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .tool-btn:hover { background: var(--hover); }
+    .msg-search-input {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 7px 10px;
+      font-size: 12px;
+      width: 180px;
+      outline: none;
+    }
 
     .input-bar {
       position: absolute;
@@ -935,7 +977,11 @@
 
         <div class="chat-title" id="chatTitle">Asho AI</div>
 
-        <div class="header-right"></div>
+        <div class="header-right">
+          <input id="messageSearchInput" class="msg-search-input" placeholder="Search in chat" />
+          <button id="editLastBtn" class="tool-btn" type="button">Edit + Regenerate</button>
+          <button id="regenBtn" class="tool-btn" type="button">Regenerate</button>
+        </div>
       </header>
 
       <section id="chat" class="messages-wrap">
@@ -1078,6 +1124,9 @@
     const loginTitle = document.getElementById("loginTitle");
     const googleSignInEl = document.getElementById("googleSignIn");
     const authRequired = document.getElementById("authRequired");
+    const messageSearchInput = document.getElementById("messageSearchInput");
+    const editLastBtn = document.getElementById("editLastBtn");
+    const regenBtn = document.getElementById("regenBtn");
 
     const chat = document.getElementById("chat");
     const welcomePanel = document.getElementById("welcomePanel");
@@ -1091,6 +1140,7 @@
     let isStreaming = false;
     let chats = [];
     let activeChatId = null;
+    let currentConversationMessages = [];
     let currentUser = null;
     let authMode = "signin";
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
@@ -1308,7 +1358,13 @@
 
     function renderHistory() {
       const q = (searchInput.value || "").toLowerCase();
-      const filtered = chats.filter(c => (c.title || "").toLowerCase().includes(q));
+      const ordered = [...chats].sort((a, b) => {
+        const pa = Number(a.pinned || 0);
+        const pb = Number(b.pinned || 0);
+        if (pb !== pa) return pb - pa;
+        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+      });
+      const filtered = ordered.filter(c => (c.title || "").toLowerCase().includes(q));
       historyEl.innerHTML = "";
 
       for (const c of filtered) {
@@ -1317,13 +1373,31 @@
         row.className = "chat-item" + (c.id === activeChatId ? " active" : "");
         row.innerHTML = `
           <span class="chat-label">${escapeHtml(c.title || "New chat")}</span>
-          <span class="delete-chat" aria-label="Delete">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18" stroke-linecap="round"/><path d="M8 6V4h8v2" stroke-linecap="round"/><path d="m19 6-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="chat-item-actions">
+            <span class="pin-chat ${c.pinned ? "pinned" : ""}" aria-label="Pin">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="${c.pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2"><path d="M12 17v5" stroke-linecap="round"/><path d="M5 3h14l-3 8v3H8v-3L5 3z" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="delete-chat" aria-label="Delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18" stroke-linecap="round"/><path d="M8 6V4h8v2" stroke-linecap="round"/><path d="m19 6-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
           </span>
         `;
 
         row.addEventListener("click", async (e) => {
           const del = e.target.closest(".delete-chat");
+          const pin = e.target.closest(".pin-chat");
+          if (pin) {
+            e.stopPropagation();
+            await apiJson(`/conversations/${c.id}/pin`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ pinned: !c.pinned }),
+            });
+            c.pinned = c.pinned ? 0 : 1;
+            c.updated_at = new Date().toISOString();
+            renderHistory();
+            return;
+          }
           if (del) {
             e.stopPropagation();
             await deleteConversation(c.id);
@@ -1394,6 +1468,7 @@
     }
 
     function renderConversationMessages(messages) {
+      currentConversationMessages = (messages || []).map((m) => ({ role: m.role, content: m.content || "" }));
       clearMessages();
       for (const m of messages || []) {
         if (m.role === "assistant") {
@@ -1403,7 +1478,86 @@
           addMessageRow("user", m.content || "");
         }
       }
+      applyMessageSearch();
       refreshWelcome();
+    }
+
+    function applyMessageSearch() {
+      const q = (messageSearchInput.value || "").trim().toLowerCase();
+      const rows = Array.from(chat.querySelectorAll(".message-row"));
+      rows.forEach((row) => row.classList.remove("search-hit"));
+      if (!q) return;
+      rows.forEach((row) => {
+        const msg = row.querySelector(".message");
+        if (!msg) return;
+        const text = (msg.textContent || "").toLowerCase();
+        if (text.includes(q)) row.classList.add("search-hit");
+      });
+    }
+
+    function findLastUserMessageIndex() {
+      for (let i = currentConversationMessages.length - 1; i >= 0; i -= 1) {
+        if (currentConversationMessages[i].role === "user") return i;
+      }
+      return -1;
+    }
+
+    async function regenerateLastMessage(editedText = null) {
+      if (!activeChatId) return;
+      const lastUserIdx = findLastUserMessageIndex();
+      if (lastUserIdx === -1) return;
+
+      if (editedText !== null) {
+        currentConversationMessages[lastUserIdx].content = editedText;
+      }
+      currentConversationMessages = currentConversationMessages.slice(0, lastUserIdx + 1);
+      renderConversationMessages(currentConversationMessages);
+      addTyping();
+
+      controller = new AbortController();
+      try {
+        const body = {};
+        if (editedText !== null) body.message = editedText;
+        const res = await fetch(`/conversations/${activeChatId}/regenerate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) {
+          removeTyping();
+          addMessageRow("assistant", "Request failed.");
+          return;
+        }
+        const titleFromHeader = res.headers.get("X-Conversation-Title");
+        if (titleFromHeader) {
+          chatTitle.textContent = titleFromHeader;
+          updateChatMeta(activeChatId, titleFromHeader);
+        }
+        removeTyping();
+        const botDiv = addMessageRow("assistant", "");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let botText = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          botText += decoder.decode(value, { stream: true });
+          botDiv.innerHTML = renderSafeMarkdown(botText);
+          addCopyButtons(botDiv);
+        }
+        await loadConversations(activeChatId);
+      } catch (err) {
+        removeTyping();
+        if (err.name === "AbortError") {
+          addMessageRow("assistant", "Stopped.");
+        } else {
+          addMessageRow("assistant", "Request failed.");
+        }
+      } finally {
+        controller = undefined;
+        setStreaming(false);
+      }
     }
 
     function addTyping() {
@@ -1688,6 +1842,27 @@
     });
     settingsTabs.forEach((btn) => {
       btn.addEventListener("click", () => setSettingsTab(btn.dataset.tab));
+    });
+    messageSearchInput.addEventListener("input", applyMessageSearch);
+    regenBtn.addEventListener("click", async () => {
+      if (!activeChatId || isStreaming) return;
+      if (findLastUserMessageIndex() === -1) return;
+      setStreaming(true);
+      await regenerateLastMessage(null);
+      input.focus();
+    });
+    editLastBtn.addEventListener("click", async () => {
+      if (!activeChatId || isStreaming) return;
+      const idx = findLastUserMessageIndex();
+      if (idx === -1) return;
+      const original = currentConversationMessages[idx].content || "";
+      const edited = prompt("Edit your last message:", original);
+      if (edited === null) return;
+      const text = edited.trim();
+      if (!text) return;
+      setStreaming(true);
+      await regenerateLastMessage(text);
+      input.focus();
     });
     document.addEventListener("click", () => toggleUserMenu(false));
 
