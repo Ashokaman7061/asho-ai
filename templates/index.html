@@ -1010,11 +1010,7 @@
 
         <div class="chat-title" id="chatTitle">Asho AI</div>
 
-        <div class="header-right">
-          <input id="messageSearchInput" class="msg-search-input" placeholder="Search in chat" />
-          <button id="editLastBtn" class="tool-btn" type="button">Edit + Regenerate</button>
-          <button id="regenBtn" class="tool-btn" type="button">Regenerate</button>
-        </div>
+        <div class="header-right"></div>
       </header>
 
       <section id="chat" class="messages-wrap">
@@ -1168,6 +1164,12 @@
     const sendBtn = document.getElementById("sendBtn");
     const sendIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13" stroke-linecap="round"></path><path d="m12 5 7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
     const stopIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"></rect></svg>';
+
+    const controls = {
+      messageSearchInput,
+      editLastBtn,
+      regenBtn,
+    };
 
     let controller;
     let isStreaming = false;
@@ -1518,7 +1520,9 @@
     }
 
     function applyMessageSearch() {
-      const q = (messageSearchInput.value || "").trim().toLowerCase();
+      const q = ((controls.messageSearchInput && controls.messageSearchInput.value) || "")
+        .trim()
+        .toLowerCase();
       const rows = Array.from(chat.querySelectorAll(".message-row"));
       rows.forEach((row) => row.classList.remove("search-hit"));
       if (!q) return;
@@ -1677,7 +1681,8 @@
         } catch {}
       });
       regenActionBtn.addEventListener("click", () => {
-        if (!isStreaming) regenBtn.click();
+        if (isStreaming) return;
+        regenerateLastMessage(null).catch(() => {});
       });
       likeBtn.addEventListener("click", () => {
         likeBtn.classList.toggle("active");
@@ -1975,27 +1980,33 @@
     settingsTabs.forEach((btn) => {
       btn.addEventListener("click", () => setSettingsTab(btn.dataset.tab));
     });
-    messageSearchInput.addEventListener("input", applyMessageSearch);
-    regenBtn.addEventListener("click", async () => {
-      if (!activeChatId || isStreaming) return;
-      if (findLastUserMessageIndex() === -1) return;
-      setStreaming(true);
-      await regenerateLastMessage(null);
-      input.focus();
-    });
-    editLastBtn.addEventListener("click", async () => {
-      if (!activeChatId || isStreaming) return;
-      const idx = findLastUserMessageIndex();
-      if (idx === -1) return;
-      const original = currentConversationMessages[idx].content || "";
-      const edited = prompt("Edit your last message:", original);
-      if (edited === null) return;
-      const text = edited.trim();
-      if (!text) return;
-      setStreaming(true);
-      await regenerateLastMessage(text);
-      input.focus();
-    });
+    if (controls.messageSearchInput) {
+      controls.messageSearchInput.addEventListener("input", applyMessageSearch);
+    }
+    if (controls.regenBtn) {
+      controls.regenBtn.addEventListener("click", async () => {
+        if (!activeChatId || isStreaming) return;
+        if (findLastUserMessageIndex() === -1) return;
+        setStreaming(true);
+        await regenerateLastMessage(null);
+        input.focus();
+      });
+    }
+    if (controls.editLastBtn) {
+      controls.editLastBtn.addEventListener("click", async () => {
+        if (!activeChatId || isStreaming) return;
+        const idx = findLastUserMessageIndex();
+        if (idx === -1) return;
+        const original = currentConversationMessages[idx].content || "";
+        const edited = prompt("Edit your last message:", original);
+        if (edited === null) return;
+        const text = edited.trim();
+        if (!text) return;
+        setStreaming(true);
+        await regenerateLastMessage(text);
+        input.focus();
+      });
+    }
     document.addEventListener("click", () => toggleUserMenu(false));
 
     form.addEventListener("submit", async (e) => {
