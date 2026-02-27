@@ -25,6 +25,7 @@ $env:FLASK_SECRET_KEY="change-me-strong-secret"
 $env:COOKIE_SECURE="0"
 $env:GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
 $env:SEARCH_MAX_RESULTS="5"
+$env:SEARCH_TIMEOUT_SECONDS="12"
 $env:DDGS_PROXY=""
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
@@ -48,6 +49,7 @@ python main.py
 - `COOKIE_SECURE=1`
 - `GOOGLE_CLIENT_ID=<google-oauth-client-id>`
 - `SEARCH_MAX_RESULTS=5`
+- `SEARCH_TIMEOUT_SECONDS=12`
 - `DDGS_PROXY=<optional-proxy-url>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`

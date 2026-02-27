@@ -1,4 +1,5 @@
 import json
+import json
 import logging
 import os
 import sqlite3
@@ -32,6 +33,7 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "5"))
+SEARCH_TIMEOUT_SECONDS = int(os.getenv("SEARCH_TIMEOUT_SECONDS", "12"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
@@ -173,36 +175,60 @@ def web_search(query, num=5):
     query_l = (query or "").lower()
     is_news_query = any(k in query_l for k in ["news", "breaking", "headline", "latest"])
     ddgs_proxy = os.getenv("DDGS_PROXY", "").strip() or None
-    ddgs = DDGS(proxy=ddgs_proxy, timeout=12)
-    try:
-        if is_news_query:
-            payload = ddgs.news(
-                keywords=query,
-                region="wt-wt",
-                safesearch="moderate",
-                timelimit="d",
-                max_results=maxn,
-            )
-        else:
-            payload = ddgs.text(
-                keywords=query,
-                region="wt-wt",
-                safesearch="moderate",
-                backend="auto",
-                max_results=maxn,
-            )
-    except (RatelimitException, TimeoutException, DuckDuckGoSearchException) as exc:
-        app.logger.warning("DDGS search failed: %s", exc)
-        return []
-    except Exception as exc:
-        app.logger.warning("DDGS unexpected error: %s", exc)
-        return []
+    ddgs = DDGS(proxy=ddgs_proxy, timeout=SEARCH_TIMEOUT_SECONDS)
+    payload = []
+    attempts = []
+    if is_news_query:
+        attempts = [
+            ("news", {"timelimit": "d"}),
+            ("news", {"timelimit": None}),
+            ("text", {"backend": "html"}),
+            ("text", {"backend": "lite"}),
+        ]
+    else:
+        attempts = [
+            ("text", {"backend": "auto"}),
+            ("text", {"backend": "html"}),
+            ("text", {"backend": "lite"}),
+            ("news", {"timelimit": "d"}),
+        ]
+
+    for mode, opts in attempts:
+        try:
+            if mode == "news":
+                payload = ddgs.news(
+                    keywords=query,
+                    region="wt-wt",
+                    safesearch="moderate",
+                    timelimit=opts.get("timelimit"),
+                    max_results=maxn,
+                )
+            else:
+                payload = ddgs.text(
+                    keywords=query,
+                    region="wt-wt",
+                    safesearch="moderate",
+                    backend=opts.get("backend", "auto"),
+                    max_results=maxn,
+                )
+            if payload:
+                break
+        except (RatelimitException, TimeoutException, DuckDuckGoSearchException) as exc:
+            app.logger.warning("DDGS %s search failed (%s): %s", mode, opts, exc)
+        except Exception as exc:
+            app.logger.warning("DDGS %s unexpected error (%s): %s", mode, opts, exc)
+
     items = []
+    seen = set()
     for item in (payload or [])[:maxn]:
+        link = item.get("href", "") or item.get("url", "")
+        if not link or link in seen:
+            continue
+        seen.add(link)
         items.append(
             {
-                "title": item.get("title", ""),
-                "link": item.get("href", "") or item.get("url", ""),
+                "title": item.get("title", "") or link,
+                "link": link,
                 "snippet": item.get("snippet", "") or item.get("body", ""),
             }
         )
