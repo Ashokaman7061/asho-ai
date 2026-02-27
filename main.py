@@ -2,9 +2,11 @@ import json
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,8 +48,8 @@ SYSTEM_PROMPT = (
     "Always reply in the same language the user uses. "
     "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you. "
     "Be strictly honest: never fabricate facts. If you do not know something, clearly say you do not know. "
-    "A web search tool is available via system context. Use web results when needed for factual freshness; for stable/general questions, answer directly. "
-    "When web results are present, summarize them clearly and briefly, and answer in the user's language. "
+    "A web search tool is available via system context. Use web results for factual/current/event/date questions. "
+    "When web results are present, summarize them clearly and briefly, answer in the user's language, and include source URLs. "
     "Use current real-time date/time context provided in system messages; do not rely on stale training-time dates."
 )
 
@@ -172,26 +174,16 @@ def web_search_enabled():
 
 def web_search(query, num=5):
     maxn = max(1, min(num, 10))
-    query_l = (query or "").lower()
-    is_news_query = any(k in query_l for k in ["news", "breaking", "headline", "latest"])
     ddgs_proxy = os.getenv("DDGS_PROXY", "").strip() or None
     ddgs = DDGS(proxy=ddgs_proxy, timeout=SEARCH_TIMEOUT_SECONDS)
     payload = []
-    attempts = []
-    if is_news_query:
-        attempts = [
-            ("news", {"timelimit": "d"}),
-            ("news", {"timelimit": None}),
-            ("text", {"backend": "html"}),
-            ("text", {"backend": "lite"}),
-        ]
-    else:
-        attempts = [
-            ("text", {"backend": "auto"}),
-            ("text", {"backend": "html"}),
-            ("text", {"backend": "lite"}),
-            ("news", {"timelimit": "d"}),
-        ]
+    attempts = [
+        ("text", {"backend": "auto"}),
+        ("text", {"backend": "html"}),
+        ("text", {"backend": "lite"}),
+        ("news", {"timelimit": "d"}),
+        ("news", {"timelimit": None}),
+    ]
 
     for mode, opts in attempts:
         try:
@@ -235,6 +227,29 @@ def web_search(query, num=5):
     return items
 
 
+def strip_html(raw):
+    text = re.sub(r"<script.*?>.*?</script>", " ", raw, flags=re.I | re.S)
+    text = re.sub(r"<style.*?>.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def fetch_page_summary(url):
+    if not url:
+        return ""
+    try:
+        with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+            res = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code >= 400:
+                return ""
+            text = strip_html(res.text)
+            return text[:900]
+    except Exception:
+        return ""
+
+
 def build_web_context_message(results):
     if not results:
         return ""
@@ -243,6 +258,8 @@ def build_web_context_message(results):
         lines.append(f"{i}. {r['title']}")
         lines.append(f"   URL: {r['link']}")
         lines.append(f"   Snippet: {r['snippet']}")
+        if r.get("page_summary"):
+            lines.append(f"   Page summary: {r['page_summary']}")
     lines.append("When possible, cite the URL(s) you used in your final answer.")
     return "\n".join(lines)
 
@@ -773,10 +790,21 @@ def chat_api():
             if web_search_enabled():
                 try:
                     results = web_search(user_text, num=SEARCH_MAX_RESULTS)
+                    # Pull quick summaries from top pages for higher factual precision.
+                    for r in results[:3]:
+                        r["page_summary"] = fetch_page_summary(r.get("link", ""))
                     web_context = build_web_context_message(results)
                     if web_context:
+                        web_instruction = (
+                            "Use web context only when needed for factual/current/event/date claims. "
+                            "For normal conversation, answer naturally without forcing web data. "
+                            "When a factual claim depends on current or external information, verify from web results, "
+                            "and if exact value/date is unavailable, clearly say it is not confirmed. "
+                            "Whenever web facts are used, include at least one source URL."
+                        )
                         model_messages = [
                             model_messages[0],
+                            {"role": "system", "content": web_instruction},
                             {"role": "system", "content": web_context},
                             *model_messages[1:],
                         ]
