@@ -2,21 +2,13 @@ import json
 import json
 import logging
 import os
-import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
-from html import unescape
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import (
-    DuckDuckGoSearchException,
-    RatelimitException,
-    TimeoutException,
-)
 from flask import Flask, Response, jsonify, render_template, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -34,8 +26,6 @@ app.permanent_session_lifetime = timedelta(days=int(os.getenv("SESSION_DAYS", "3
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "5"))
-SEARCH_TIMEOUT_SECONDS = int(os.getenv("SEARCH_TIMEOUT_SECONDS", "12"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
@@ -48,8 +38,6 @@ SYSTEM_PROMPT = (
     "Always reply in the same language the user uses. "
     "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you. "
     "Be strictly honest: never fabricate facts. If you do not know something, clearly say you do not know. "
-    "A web search tool is available via system context. Use web results for factual/current/event/date questions. "
-    "When web results are present, summarize them clearly and briefly, answer in the user's language, and include source URLs. "
     "Use current real-time date/time context provided in system messages; do not rely on stale training-time dates."
 )
 
@@ -166,102 +154,6 @@ def get_ollama_chat_url():
         return "https://ollama.com/api/chat"
     host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     return host + "/api/chat"
-
-
-def web_search_enabled():
-    return True
-
-
-def web_search(query, num=5):
-    maxn = max(1, min(num, 10))
-    ddgs_proxy = os.getenv("DDGS_PROXY", "").strip() or None
-    ddgs = DDGS(proxy=ddgs_proxy, timeout=SEARCH_TIMEOUT_SECONDS)
-    payload = []
-    attempts = [
-        ("text", {"backend": "auto"}),
-        ("text", {"backend": "html"}),
-        ("text", {"backend": "lite"}),
-        ("news", {"timelimit": "d"}),
-        ("news", {"timelimit": None}),
-    ]
-
-    for mode, opts in attempts:
-        try:
-            if mode == "news":
-                payload = ddgs.news(
-                    keywords=query,
-                    region="wt-wt",
-                    safesearch="moderate",
-                    timelimit=opts.get("timelimit"),
-                    max_results=maxn,
-                )
-            else:
-                payload = ddgs.text(
-                    keywords=query,
-                    region="wt-wt",
-                    safesearch="moderate",
-                    backend=opts.get("backend", "auto"),
-                    max_results=maxn,
-                )
-            if payload:
-                break
-        except (RatelimitException, TimeoutException, DuckDuckGoSearchException) as exc:
-            app.logger.warning("DDGS %s search failed (%s): %s", mode, opts, exc)
-        except Exception as exc:
-            app.logger.warning("DDGS %s unexpected error (%s): %s", mode, opts, exc)
-
-    items = []
-    seen = set()
-    for item in (payload or [])[:maxn]:
-        link = item.get("href", "") or item.get("url", "")
-        if not link or link in seen:
-            continue
-        seen.add(link)
-        items.append(
-            {
-                "title": item.get("title", "") or link,
-                "link": link,
-                "snippet": item.get("snippet", "") or item.get("body", ""),
-            }
-        )
-    return items
-
-
-def strip_html(raw):
-    text = re.sub(r"<script.*?>.*?</script>", " ", raw, flags=re.I | re.S)
-    text = re.sub(r"<style.*?>.*?</style>", " ", text, flags=re.I | re.S)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = unescape(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-
-def fetch_page_summary(url):
-    if not url:
-        return ""
-    try:
-        with httpx.Client(timeout=8.0, follow_redirects=True) as client:
-            res = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if res.status_code >= 400:
-                return ""
-            text = strip_html(res.text)
-            return text[:900]
-    except Exception:
-        return ""
-
-
-def build_web_context_message(results):
-    if not results:
-        return ""
-    lines = ["Web search results (use these for up-to-date facts):"]
-    for i, r in enumerate(results, start=1):
-        lines.append(f"{i}. {r['title']}")
-        lines.append(f"   URL: {r['link']}")
-        lines.append(f"   Snippet: {r['snippet']}")
-        if r.get("page_summary"):
-            lines.append(f"   Page summary: {r['page_summary']}")
-    lines.append("When possible, cite the URL(s) you used in your final answer.")
-    return "\n".join(lines)
 
 
 def stream_ollama_chat(messages):
@@ -743,7 +635,6 @@ def chat_api():
     if is_rate_limited(ip):
         return jsonify({"error": "rate limit exceeded, try again later"}), 429
 
-    web_used = False
     with DB_LOCK:
         conn = get_db()
         try:
@@ -788,30 +679,6 @@ def chat_api():
                 {"role": "system", "content": realtime_context},
                 *model_messages[1:],
             ]
-            if web_search_enabled():
-                try:
-                    results = web_search(user_text, num=SEARCH_MAX_RESULTS)
-                    # Pull quick summaries from top pages for higher factual precision.
-                    for r in results[:3]:
-                        r["page_summary"] = fetch_page_summary(r.get("link", ""))
-                    web_context = build_web_context_message(results)
-                    if web_context:
-                        web_used = True
-                        web_instruction = (
-                            "Use web context only when needed for factual/current/event/date claims. "
-                            "For normal conversation, answer naturally without forcing web data. "
-                            "When a factual claim depends on current or external information, verify from web results, "
-                            "and if exact value/date is unavailable, clearly say it is not confirmed. "
-                            "Whenever web facts are used, include at least one source URL."
-                        )
-                        model_messages = [
-                            model_messages[0],
-                            {"role": "system", "content": web_instruction},
-                            {"role": "system", "content": web_context},
-                            *model_messages[1:],
-                        ]
-                except Exception as exc:
-                    app.logger.warning("web search failed: %s", exc)
             conn.commit()
         finally:
             conn.close()
@@ -847,7 +714,6 @@ def chat_api():
     response = Response(generate(), mimetype="text/plain; charset=utf-8")
     response.headers["X-Conversation-Id"] = conversation_id
     response.headers["X-Conversation-Title"] = current_title
-    response.headers["X-Web-Search-Used"] = "1" if web_used else "0"
     return response
 
 

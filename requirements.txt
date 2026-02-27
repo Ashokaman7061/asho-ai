@@ -4,4 +4,3 @@ gunicorn
 httpx
 google-auth
 requests
-duckduckgo-search

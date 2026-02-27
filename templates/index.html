@@ -707,12 +707,6 @@
       border-radius: 14px;
       background: var(--panel-2);
     }
-    .typing-label {
-      color: var(--muted);
-      font-size: 13px;
-      margin-right: 4px;
-      white-space: nowrap;
-    }
 
     .typing span {
       width: 7px;
@@ -1412,18 +1406,13 @@
       refreshWelcome();
     }
 
-    function addTyping(label = "Thinking...") {
+    function addTyping() {
       setWelcomeVisible(false);
       const row = document.createElement("div");
       row.className = "message-row assistant";
       row.id = "typingRow";
-      row.innerHTML = `<div class="typing"><span class="typing-label">${escapeHtml(label)}</span><span></span><span></span><span></span></div>`;
+      row.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
       chat.appendChild(row);
-    }
-
-    function setTypingLabel(label) {
-      const node = document.querySelector("#typingRow .typing-label");
-      if (node) node.textContent = label;
     }
 
     function removeTyping() {
@@ -1719,7 +1708,7 @@
       addMessageRow("user", text);
 
       removeTyping();
-      addTyping("Thinking...");
+      addTyping();
 
       controller = new AbortController();
 
@@ -1751,14 +1740,6 @@
           updateChatMeta(activeChatId, titleFromHeader);
           renderHistory();
         }
-        const webSearchUsed = res.headers.get("X-Web-Search-Used") === "1";
-        if (webSearchUsed) {
-          setTypingLabel("Searching the web...");
-          await new Promise((resolve) => setTimeout(resolve, 450));
-        } else {
-          setTypingLabel("Writing response...");
-        }
-
         removeTyping();
         const botDiv = addMessageRow("assistant", "");
 
