@@ -30,7 +30,7 @@ AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
-SARVAM_STT_URL_DEFAULT = "https://api.sarvam.ai/speech-to-text/transcribe"
+SARVAM_STT_URL_DEFAULT = "https://api.sarvam.ai/speech-to-text"
 SARVAM_TTS_URL_DEFAULT = "https://api.sarvam.ai/text-to-speech/stream"
 SARVAM_API_KEY_DEFAULT = "sk_c4pxpobl_5YUeMwv36cV6djoLZPDeKDos"
 
@@ -291,6 +291,16 @@ def sarvam_headers():
 
 def sarvam_stt_url():
     return os.getenv("SARVAM_STT_URL", SARVAM_STT_URL_DEFAULT).strip()
+
+
+def stt_url_candidates():
+    primary = sarvam_stt_url()
+    candidates = [primary]
+    if primary.endswith("/transcribe"):
+        candidates.append(primary.rsplit("/transcribe", 1)[0])
+    elif primary.endswith("/speech-to-text"):
+        candidates.append(primary.rstrip("/") + "/transcribe")
+    return candidates
 
 
 def sarvam_tts_url():
@@ -1017,15 +1027,29 @@ def voice_stt_api():
     if language_code:
         data["language_code"] = language_code
     try:
-        res = httpx.post(
-            sarvam_stt_url(),
-            headers=sarvam_headers(),
-            data=data,
-            files=files,
-            timeout=180.0,
-        )
-        res.raise_for_status()
-        payload = res.json()
+        payload = None
+        last_http_error = None
+        for stt_url in stt_url_candidates():
+            try:
+                res = httpx.post(
+                    stt_url,
+                    headers=sarvam_headers(),
+                    data=data,
+                    files=files,
+                    timeout=180.0,
+                )
+                res.raise_for_status()
+                payload = res.json()
+                break
+            except httpx.HTTPStatusError as exc:
+                last_http_error = exc
+                if exc.response.status_code == 404:
+                    continue
+                raise
+        if payload is None:
+            if last_http_error is not None:
+                raise last_http_error
+            raise RuntimeError("stt request failed with no response payload")
     except httpx.HTTPStatusError as exc:
         body = ""
         try:
