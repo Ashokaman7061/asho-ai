@@ -1,5 +1,4 @@
 import json
-import asyncio
 import logging
 import os
 import sqlite3
@@ -13,7 +12,6 @@ from flask import Flask, Response, jsonify, render_template, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from werkzeug.security import check_password_hash, generate_password_hash
-from web import intelligent_search_pipeline
 
 app = Flask(__name__, static_folder="static", static_url_path="/assets")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -683,23 +681,6 @@ def chat_api():
             conn.commit()
         finally:
             conn.close()
-
-    ollama_url = get_ollama_chat_url()
-    ollama_headers = {"Authorization": f"Bearer {OLLAMA_API_KEY}"} if OLLAMA_API_KEY else None
-    try:
-        search_messages = asyncio.run(
-            intelligent_search_pipeline(
-                SYSTEM_PROMPT,
-                user_text,
-                ollama_url,
-                MODEL_NAME,
-                headers=ollama_headers,
-            )
-        )
-        if search_messages:
-            model_messages = search_messages
-    except Exception as exc:
-        app.logger.warning("intelligent search pipeline failed: %s", exc)
 
     def generate():
         full_text = []
