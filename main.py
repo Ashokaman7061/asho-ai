@@ -30,13 +30,8 @@ AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
-SARVAM_STT_URL = os.getenv(
-    "SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text/transcribe"
-).strip()
-SARVAM_TTS_URL = os.getenv(
-    "SARVAM_TTS_URL", "https://api.sarvam.ai/text-to-speech/stream"
-).strip()
+SARVAM_STT_URL_DEFAULT = "https://api.sarvam.ai/speech-to-text/transcribe"
+SARVAM_TTS_URL_DEFAULT = "https://api.sarvam.ai/text-to-speech/stream"
 
 SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
@@ -282,9 +277,26 @@ def stream_ollama_chat(messages):
 
 
 def sarvam_headers():
+    api_key = (
+        os.getenv("SARVAM_API_KEY", "").strip()
+        or os.getenv("SARVAM_API_SUBSCRIPTION_KEY", "").strip()
+        or os.getenv("API_SUBSCRIPTION_KEY", "").strip()
+    )
     return {
-        "api-subscription-key": SARVAM_API_KEY,
+        "api-subscription-key": api_key,
     }
+
+
+def sarvam_stt_url():
+    return os.getenv("SARVAM_STT_URL", SARVAM_STT_URL_DEFAULT).strip()
+
+
+def sarvam_tts_url():
+    return os.getenv("SARVAM_TTS_URL", SARVAM_TTS_URL_DEFAULT).strip()
+
+
+def has_sarvam_api_key():
+    return bool(sarvam_headers().get("api-subscription-key"))
 
 
 def client_ip():
@@ -987,7 +999,7 @@ def voice_stt_api():
     user_sub = require_user()
     if not user_sub:
         return jsonify({"error": "auth required"}), 401
-    if not SARVAM_API_KEY:
+    if not has_sarvam_api_key():
         return jsonify({"error": "sarvam api key not configured"}), 503
     file = request.files.get("audio")
     if not file:
@@ -1004,7 +1016,7 @@ def voice_stt_api():
         data["language_code"] = language_code
     try:
         res = httpx.post(
-            SARVAM_STT_URL,
+            sarvam_stt_url(),
             headers=sarvam_headers(),
             data=data,
             files=files,
@@ -1045,7 +1057,7 @@ def voice_tts_api():
     user_sub = require_user()
     if not user_sub:
         return jsonify({"error": "auth required"}), 401
-    if not SARVAM_API_KEY:
+    if not has_sarvam_api_key():
         return jsonify({"error": "sarvam api key not configured"}), 503
     payload = request.get_json(silent=True) or {}
     text = (payload.get("text") or "").strip()
@@ -1066,7 +1078,7 @@ def voice_tts_api():
         try:
             with httpx.stream(
                 "POST",
-                SARVAM_TTS_URL,
+                sarvam_tts_url(),
                 headers={**sarvam_headers(), "Content-Type": "application/json"},
                 json=req_payload,
                 timeout=180.0,
