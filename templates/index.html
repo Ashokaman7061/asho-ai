@@ -641,18 +641,6 @@
     }
 
     .message.assistant { width: 100%; }
-    .meta-note {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--muted);
-      border: 1px solid var(--border);
-      background: color-mix(in srgb, var(--panel-2) 80%, transparent);
-      border-radius: 999px;
-      padding: 4px 10px;
-      margin-bottom: 10px;
-    }
 
     .message.assistant p { margin: 0 0 10px; }
     .message.assistant ul, .message.assistant ol { margin: 0 0 10px; padding-left: 22px; }
@@ -1461,14 +1449,6 @@
       }
     }
 
-    function addLiveDataBadge(container) {
-      if (!container) return;
-      const badge = document.createElement("div");
-      badge.className = "meta-note";
-      badge.textContent = "Live data used";
-      container.prepend(badge);
-    }
-
     function setStreaming(streaming) {
       isStreaming = streaming;
       input.disabled = streaming;
@@ -1760,10 +1740,8 @@
           updateChatMeta(activeChatId, titleFromHeader);
           renderHistory();
         }
-        const realtimeDataUsed = res.headers.get("X-Realtime-Data-Used") === "1";
         removeTyping();
         const botDiv = addMessageRow("assistant", "");
-        if (realtimeDataUsed) addLiveDataBadge(botDiv);
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
