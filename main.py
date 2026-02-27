@@ -44,7 +44,7 @@ SYSTEM_PROMPT = (
     "Always reply in the same language the user uses. "
     "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you. "
     "Be strictly honest: never fabricate facts. If you do not know something, clearly say you do not know. "
-    "For topics where information can change over time (news, prices, weather, scores, releases, policies, dates, availability), use live web data when needed; otherwise answer normally without unnecessary web lookup. "
+    "A web search tool is available via system context. Use web results when needed for factual freshness; for stable/general questions, answer directly. "
     "Use current real-time date/time context provided in system messages; do not rely on stale training-time dates."
 )
 
@@ -165,38 +165,6 @@ def get_ollama_chat_url():
 
 def web_search_enabled():
     return True
-
-
-def should_try_web_search(text):
-    t = (text or "").strip().lower()
-    if len(t) < 4:
-        return False
-    if t in {"hi", "hello", "hey", "ok", "thanks", "thank you"}:
-        return False
-    dynamic_markers = [
-        "latest",
-        "current",
-        "today",
-        "today's",
-        "now",
-        "news",
-        "price",
-        "stock",
-        "weather",
-        "forecast",
-        "score",
-        "result",
-        "live",
-        "schedule",
-        "rate",
-        "version",
-        "release",
-        "policy",
-        "rules",
-        "date",
-        "time",
-    ]
-    return any(m in t for m in dynamic_markers)
 
 
 def web_search(query, num=5):
@@ -775,7 +743,7 @@ def chat_api():
                 {"role": "system", "content": realtime_context},
                 *model_messages[1:],
             ]
-            if web_search_enabled() and should_try_web_search(user_text):
+            if web_search_enabled():
                 try:
                     results = web_search(user_text, num=SEARCH_MAX_RESULTS)
                     web_context = build_web_context_message(results)
