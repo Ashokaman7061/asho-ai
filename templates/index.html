@@ -1356,6 +1356,7 @@
     let ttsAbortController = null;
     let recordAutoStopTimer = null;
     let sttFailureCount = 0;
+    const MAX_VOICE_TEXT_CHARS = 600;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -2059,16 +2060,22 @@
     }
 
     async function transcribeAudio(blob) {
+      const browserLang = (navigator.language || "hi-IN").trim();
+      const langHint = /^[a-z]{2}-[A-Z]{2}$/.test(browserLang) ? browserLang : "hi-IN";
       const fd = new FormData();
       fd.append("audio", blob, "voice.webm");
-      fd.append("language_code", "unknown");
+      fd.append("language_code", langHint);
       const res = await fetch("/voice/stt", {
         method: "POST",
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.details || data.error || "STT failed");
-      return (data.text || "").trim();
+      let text = (data.text || "").trim().replace(/\s+/g, " ");
+      if (text.length > MAX_VOICE_TEXT_CHARS) {
+        text = text.slice(0, MAX_VOICE_TEXT_CHARS).trim();
+      }
+      return text;
     }
 
     async function speakWithSarvam(text) {
@@ -2644,7 +2651,8 @@
           if (voiceConversationActive) await startRecording();
           return;
         }
-        await sendMessage(text, true);
+        const stableText = text.replace(/(.)\1{8,}/g, "$1$1$1");
+        await sendMessage(stableText, true);
       } catch (err) {
         sttFailureCount += 1;
         addMessageRow("assistant", `Voice transcription failed: ${err?.message || "unknown error"}`);
