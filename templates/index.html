@@ -750,13 +750,8 @@
       <div class="history" id="history"></div>
 
       <div class="side-bottom">
-        <button class="bottom-btn" type="button">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke-linecap="round"/></svg>
-          <span class="hidden-when-collapsed">Settings</span>
-        </button>
         <div id="authBox" class="auth-box hidden-when-collapsed">
           <span id="authName" class="auth-name" style="display:none;"></span>
-          <button id="logoutBtn" class="logout-btn" type="button" style="display:none;">Logout</button>
         </div>
         <div id="userMenu" class="user-menu">
           <button id="menuSettings" class="menu-item" type="button">Settings</button>
@@ -871,7 +866,6 @@
     const authSwitchText = document.getElementById("authSwitchText");
     const loginTitle = document.getElementById("loginTitle");
     const googleSignInEl = document.getElementById("googleSignIn");
-    const logoutBtn = document.getElementById("logoutBtn");
     const authRequired = document.getElementById("authRequired");
     const themeToggle = document.getElementById("themeToggle");
     const themeIcon = document.getElementById("themeIcon");
@@ -961,7 +955,6 @@
       currentUser = user || null;
       if (!AUTH_ENABLED) {
         googleSignInEl.style.display = "none";
-        logoutBtn.style.display = "none";
         authName.style.display = "none";
         showAuthRequired(false);
         return;
@@ -969,12 +962,10 @@
       if (currentUser) {
         authName.textContent = currentUser.name || currentUser.email || "Signed in";
         authName.style.display = "inline";
-        logoutBtn.style.display = "inline-block";
         googleSignInEl.style.display = "none";
         showAuthRequired(false);
       } else {
         authName.style.display = "none";
-        logoutBtn.style.display = "none";
         googleSignInEl.style.display = "block";
         showAuthRequired(true);
       }
@@ -1349,14 +1340,6 @@
       authPasswordInput.type = visible ? "password" : "text";
       passToggleBtn.textContent = visible ? "Show" : "Hide";
       passToggleBtn.setAttribute("aria-label", visible ? "Show password" : "Hide password");
-    });
-    logoutBtn.addEventListener("click", async () => {
-      await fetch("/auth/logout", { method: "POST" }).catch(() => {});
-      updateAuthUI(null);
-      activeChatId = null;
-      clearMessages();
-      refreshWelcome();
-      renderHistory();
     });
     authName.addEventListener("click", (e) => {
       e.stopPropagation();
