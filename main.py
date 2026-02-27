@@ -484,6 +484,16 @@ def health():
     return jsonify({"ok": True})
 
 
+@app.get("/terms")
+def terms_page():
+    return render_template("terms.html")
+
+
+@app.get("/privacy")
+def privacy_page():
+    return render_template("privacy.html")
+
+
 @app.get("/conversations")
 def list_conversations():
     user_sub = require_user()
