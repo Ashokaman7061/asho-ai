@@ -146,6 +146,27 @@ def title_from_text(text):
     return " ".join(words[:7])[:60]
 
 
+def maybe_auto_rename_title(conn, conversation_id, current_title):
+    rows = conn.execute(
+        "SELECT content FROM messages WHERE conversation_id=? AND role='user' ORDER BY id ASC LIMIT 3",
+        (conversation_id,),
+    ).fetchall()
+    if len(rows) < 3:
+        return current_title
+
+    combined = " ".join((r["content"] or "").strip() for r in rows).strip()
+    auto_title = title_from_text(combined)
+    if not auto_title or auto_title == "New chat" or auto_title == current_title:
+        return current_title
+
+    now = utc_now_iso()
+    conn.execute(
+        "UPDATE conversations SET title=?, updated_at=? WHERE id=?",
+        (auto_title, now, conversation_id),
+    )
+    return auto_title
+
+
 def get_ollama_chat_url():
     if OLLAMA_BASE_URL:
         return OLLAMA_BASE_URL.rstrip("/") + "/chat"
@@ -678,6 +699,7 @@ def chat_api():
                 {"role": "system", "content": realtime_context},
                 *model_messages[1:],
             ]
+            current_title = maybe_auto_rename_title(conn, conversation_id, current_title)
             conn.commit()
         finally:
             conn.close()
