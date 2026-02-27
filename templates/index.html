@@ -323,6 +323,62 @@
     .chat-menu-item.danger:hover {
       background: color-mix(in srgb, #ff8f98 12%, transparent);
     }
+    .action-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 70;
+      background: rgba(0,0,0,.45);
+      backdrop-filter: blur(2px);
+      padding: 16px;
+    }
+    .action-modal.open { display: flex; }
+    .action-card {
+      width: min(460px, 92vw);
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 16px;
+      box-shadow: 0 20px 40px rgba(0,0,0,.35);
+      padding: 16px;
+    }
+    .action-title { margin: 0 0 6px; font-size: 18px; }
+    .action-desc { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+    .action-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    .action-input:focus { border-color: #4e73a6; }
+    .action-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .action-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .action-btn:hover { background: var(--hover); }
+    .action-btn.danger {
+      border-color: color-mix(in srgb, #ff8f98 50%, var(--border));
+      color: #ff8f98;
+    }
+    .action-btn.danger:hover {
+      background: color-mix(in srgb, #ff8f98 12%, transparent);
+    }
 
     .chat-item:hover, .chat-item.active {
       background: var(--hover);
@@ -1165,6 +1221,17 @@
       </div>
     </div>
   </div>
+  <div id="actionModal" class="action-modal">
+    <div class="action-card">
+      <h3 id="actionTitle" class="action-title">Action</h3>
+      <p id="actionDesc" class="action-desc"></p>
+      <input id="actionInput" class="action-input" maxlength="80" />
+      <div class="action-row">
+        <button id="actionCancelBtn" class="action-btn" type="button">Cancel</button>
+        <button id="actionConfirmBtn" class="action-btn" type="button">Save</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const sidebar = document.getElementById("sidebar");
@@ -1215,6 +1282,12 @@
     const loginTitle = document.getElementById("loginTitle");
     const googleSignInEl = document.getElementById("googleSignIn");
     const authRequired = document.getElementById("authRequired");
+    const actionModal = document.getElementById("actionModal");
+    const actionTitle = document.getElementById("actionTitle");
+    const actionDesc = document.getElementById("actionDesc");
+    const actionInput = document.getElementById("actionInput");
+    const actionCancelBtn = document.getElementById("actionCancelBtn");
+    const actionConfirmBtn = document.getElementById("actionConfirmBtn");
     const messageSearchInput = document.getElementById("messageSearchInput");
     const editLastBtn = document.getElementById("editLastBtn");
     const regenBtn = document.getElementById("regenBtn");
@@ -1240,6 +1313,7 @@
     let currentConversationMessages = [];
     let currentUser = null;
     let authMode = "signin";
+    let pendingAction = null;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -1460,6 +1534,35 @@
       window.history.replaceState({}, "", u.toString());
     }
 
+    function closeActionModal() {
+      pendingAction = null;
+      actionModal.classList.remove("open");
+      actionInput.value = "";
+    }
+
+    function openRenameModal(conversation) {
+      pendingAction = { type: "rename", conversation };
+      actionTitle.textContent = "Rename conversation";
+      actionDesc.textContent = "Set a new conversation title.";
+      actionInput.style.display = "block";
+      actionInput.value = conversation.title || "New chat";
+      actionConfirmBtn.textContent = "Save";
+      actionConfirmBtn.classList.remove("danger");
+      actionModal.classList.add("open");
+      setTimeout(() => actionInput.focus(), 0);
+      actionInput.select();
+    }
+
+    function openDeleteModal(conversation) {
+      pendingAction = { type: "delete", conversation };
+      actionTitle.textContent = "Delete conversation";
+      actionDesc.textContent = `This will permanently delete:\n"${conversation.title || "New chat"}"\n\nThis action cannot be undone.`;
+      actionInput.style.display = "none";
+      actionConfirmBtn.textContent = "Delete";
+      actionConfirmBtn.classList.add("danger");
+      actionModal.classList.add("open");
+    }
+
     function renderHistory() {
       const q = (searchInput.value || "").toLowerCase();
       const ordered = [...chats].sort((a, b) => {
@@ -1519,26 +1622,7 @@
           if (rename) {
             e.stopPropagation();
             menu.classList.remove("open");
-            const next = prompt("Rename conversation:", c.title || "New chat");
-            if (next === null) return;
-            const title = next.trim().replace(/\s+/g, " ");
-            if (!title) {
-              alert("Title cannot be empty.");
-              return;
-            }
-            if (title.length > 80) {
-              alert("Title should be 80 characters or less.");
-              return;
-            }
-            if (title === (c.title || "New chat")) return;
-            await apiJson(`/conversations/${c.id}/rename`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title }),
-            });
-            c.title = title;
-            if (activeChatId === c.id) chatTitle.textContent = title;
-            renderHistory();
+            openRenameModal(c);
             return;
           }
           if (pin) {
@@ -1571,11 +1655,7 @@
           if (del) {
             e.stopPropagation();
             menu.classList.remove("open");
-            const ok = confirm(
-              `Delete this conversation permanently?\n\n"${c.title || "New chat"}"\n\nThis action cannot be undone.`
-            );
-            if (!ok) return;
-            await deleteConversation(c.id);
+            openDeleteModal(c);
             return;
           }
           await selectConversation(c.id);
@@ -2133,6 +2213,32 @@
     });
     settingsTabs.forEach((btn) => {
       btn.addEventListener("click", () => setSettingsTab(btn.dataset.tab));
+    });
+    actionCancelBtn.addEventListener("click", closeActionModal);
+    actionModal.addEventListener("click", (e) => {
+      if (e.target === actionModal) closeActionModal();
+    });
+    actionConfirmBtn.addEventListener("click", async () => {
+      if (!pendingAction) return;
+      const { type, conversation } = pendingAction;
+      if (type === "rename") {
+        const title = actionInput.value.trim().replace(/\s+/g, " ");
+        if (!title || title.length > 80) return;
+        await apiJson(`/conversations/${conversation.id}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+        conversation.title = title;
+        if (activeChatId === conversation.id) chatTitle.textContent = title;
+        renderHistory();
+        closeActionModal();
+        return;
+      }
+      if (type === "delete") {
+        await deleteConversation(conversation.id);
+        closeActionModal();
+      }
     });
     if (controls.messageSearchInput) {
       controls.messageSearchInput.addEventListener("input", applyMessageSearch);
