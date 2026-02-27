@@ -1165,22 +1165,11 @@
       <div class="input-bar">
         <form id="f" class="input-inner">
           <textarea id="q" rows="1" placeholder="Ask anything"></textarea>
-          <button type="button" id="voiceModeBtn" class="voice-btn" aria-label="Toggle voice mode">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 10c0-1.1.9-2 2-2h2"></path><path d="M17 8h2a2 2 0 0 1 2 2v4"></path>
-              <rect x="7" y="6" width="10" height="12" rx="3"></rect>
-            </svg>
-          </button>
-          <button type="button" id="recordBtn" class="voice-btn" aria-label="Start recording">
+          <button type="button" id="voiceToggleBtn" class="voice-btn" aria-label="Start voice conversation">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="3" width="6" height="12" rx="3"></rect>
               <path d="M5 11a7 7 0 0 0 14 0"></path>
               <path d="M12 18v3"></path>
-            </svg>
-          </button>
-          <button type="button" id="interruptBtn" class="voice-btn" aria-label="Interrupt">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="7" y="7" width="10" height="10" rx="2"></rect>
             </svg>
           </button>
           <button type="submit" id="sendBtn" aria-label="Send">
@@ -1338,9 +1327,7 @@
     const welcomePanel = document.getElementById("welcomePanel");
     const form = document.getElementById("f");
     const input = document.getElementById("q");
-    const voiceModeBtn = document.getElementById("voiceModeBtn");
-    const recordBtn = document.getElementById("recordBtn");
-    const interruptBtn = document.getElementById("interruptBtn");
+    const voiceToggleBtn = document.getElementById("voiceToggleBtn");
     const sendBtn = document.getElementById("sendBtn");
     const sendIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13" stroke-linecap="round"></path><path d="m12 5 7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
     const stopIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"></rect></svg>';
@@ -1359,7 +1346,7 @@
     let currentUser = null;
     let authMode = "signin";
     let pendingAction = null;
-    let voiceModeEnabled = false;
+    let voiceConversationActive = false;
     let isRecording = false;
     let mediaRecorder = null;
     let mediaStream = null;
@@ -1456,9 +1443,7 @@
       loginGate.style.display = show ? "grid" : "none";
       input.disabled = show;
       sendBtn.disabled = show;
-      voiceModeBtn.disabled = show;
-      recordBtn.disabled = show;
-      interruptBtn.disabled = show;
+      voiceToggleBtn.disabled = show;
       newChatBtn.disabled = show;
     }
 
@@ -2030,8 +2015,7 @@
     function setStreaming(streaming) {
       isStreaming = streaming;
       input.disabled = streaming;
-      voiceModeBtn.disabled = streaming;
-      recordBtn.disabled = streaming;
+      voiceToggleBtn.disabled = streaming;
       sendBtn.classList.toggle("is-stop", streaming);
       sendBtn.setAttribute("aria-label", streaming ? "Stop" : "Send");
       sendBtn.innerHTML = streaming ? stopIcon : sendIcon;
@@ -2042,8 +2026,9 @@
         try { mediaRecorder.stop(); } catch {}
       }
       isRecording = false;
-      recordBtn.classList.remove("recording");
-      recordBtn.setAttribute("aria-label", "Start recording");
+      voiceToggleBtn.classList.remove("recording");
+      voiceToggleBtn.classList.remove("active");
+      voiceToggleBtn.setAttribute("aria-label", "Start voice conversation");
       if (mediaStream) {
         mediaStream.getTracks().forEach((t) => t.stop());
         mediaStream = null;
@@ -2140,8 +2125,9 @@
       };
       mediaRecorder.start();
       isRecording = true;
-      recordBtn.classList.add("recording");
-      recordBtn.setAttribute("aria-label", "Stop recording");
+      voiceToggleBtn.classList.add("recording");
+      voiceToggleBtn.classList.add("active");
+      voiceToggleBtn.setAttribute("aria-label", "Stop voice conversation");
     }
 
     function applyTheme(theme, persistTheme = true) {
@@ -2267,30 +2253,19 @@
         form.requestSubmit();
       }
     });
-    recordBtn.addEventListener("click", async () => {
-      if (isRecording) {
-        await stopRecordingAndSend();
-      } else {
-        try {
-          await startRecording();
-        } catch {
-          addMessageRow("assistant", "Microphone access blocked.");
-        }
-      }
-    });
-    voiceModeBtn.addEventListener("click", async () => {
-      voiceModeEnabled = !voiceModeEnabled;
-      voiceModeBtn.classList.toggle("active", voiceModeEnabled);
-      if (voiceModeEnabled && !isRecording && !isStreaming && !isAudioPlaying) {
-        try { await startRecording(); } catch {}
-      }
-      if (!voiceModeEnabled && isRecording) {
+    voiceToggleBtn.addEventListener("click", async () => {
+      if (voiceConversationActive) {
+        voiceConversationActive = false;
         stopAllVoiceActivity();
+        if (controller) controller.abort();
+        return;
       }
-    });
-    interruptBtn.addEventListener("click", () => {
-      stopAllVoiceActivity();
-      if (controller) controller.abort();
+      voiceConversationActive = true;
+      voiceToggleBtn.classList.add("active");
+      voiceToggleBtn.setAttribute("aria-label", "Stop voice conversation");
+      if (!isRecording && !isStreaming && !isAudioPlaying) {
+        try { await startRecording(); } catch { addMessageRow("assistant", "Microphone access blocked."); }
+      }
     });
 
     themeModeButtons.forEach((btn) => {
@@ -2528,7 +2503,7 @@
           } catch {
             addMessageRow("assistant", "TTS failed.");
           }
-          shouldResumeVoiceLoop = voiceModeEnabled;
+          shouldResumeVoiceLoop = voiceConversationActive;
         }
       } catch (err) {
         removeTyping();
@@ -2551,8 +2526,7 @@
         mediaRecorder.stop();
       });
       isRecording = false;
-      recordBtn.classList.remove("recording");
-      recordBtn.setAttribute("aria-label", "Start recording");
+      voiceToggleBtn.classList.remove("recording");
       if (mediaStream) {
         mediaStream.getTracks().forEach((t) => t.stop());
         mediaStream = null;
@@ -2563,13 +2537,13 @@
         const text = await transcribeAudio(blob);
         if (!text) {
           addMessageRow("assistant", "No speech detected.");
-          if (voiceModeEnabled) await startRecording();
+          if (voiceConversationActive) await startRecording();
           return;
         }
         await sendMessage(text, true);
       } catch {
         addMessageRow("assistant", "Voice transcription failed.");
-        if (voiceModeEnabled) {
+        if (voiceConversationActive) {
           try { await startRecording(); } catch {}
         }
       }
