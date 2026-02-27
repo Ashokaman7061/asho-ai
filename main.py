@@ -704,6 +704,7 @@ def chat_api():
     if is_rate_limited(ip):
         return jsonify({"error": "rate limit exceeded, try again later"}), 429
 
+    realtime_data_used = False
     with DB_LOCK:
         conn = get_db()
         try:
@@ -752,6 +753,7 @@ def chat_api():
                 rt_results = get_realtime_search_results(user_text)
                 rt_context = build_realtime_context(rt_results)
                 if rt_context:
+                    realtime_data_used = True
                     model_messages = [
                         model_messages[0],
                         {
@@ -796,6 +798,7 @@ def chat_api():
     response = Response(generate(), mimetype="text/plain; charset=utf-8")
     response.headers["X-Conversation-Id"] = conversation_id
     response.headers["X-Conversation-Title"] = current_title
+    response.headers["X-Realtime-Data-Used"] = "1" if realtime_data_used else "0"
     return response
 
 
