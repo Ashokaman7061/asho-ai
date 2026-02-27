@@ -260,6 +260,7 @@
       position: relative;
       color: var(--muted);
     }
+    .chat-item { position: relative; }
     .chat-item-actions {
       display: inline-flex;
       align-items: center;
@@ -268,6 +269,43 @@
       transition: opacity .2s ease;
     }
     .chat-item:hover .chat-item-actions { opacity: 1; }
+    .chat-more {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .chat-more:hover { color: var(--text); background: var(--hover); }
+    .chat-menu {
+      position: absolute;
+      right: 8px;
+      top: 34px;
+      z-index: 8;
+      display: none;
+      min-width: 130px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+      overflow: hidden;
+    }
+    .chat-menu.open { display: block; }
+    .chat-menu-item {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      padding: 9px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .chat-menu-item:hover { background: var(--hover); }
+    .chat-menu-item.danger { color: #ff8f98; }
     .pin-chat, .delete-chat {
       border: 0;
       background: transparent;
@@ -1409,6 +1447,13 @@
       chats.unshift(updated);
     }
 
+    function setConversationUrl(cid) {
+      const u = new URL(window.location.href);
+      if (cid) u.searchParams.set("cid", cid);
+      else u.searchParams.delete("cid");
+      window.history.replaceState({}, "", u.toString());
+    }
+
     function renderHistory() {
       const q = (searchInput.value || "").toLowerCase();
       const ordered = [...chats].sort((a, b) => {
@@ -1427,20 +1472,52 @@
         row.innerHTML = `
           <span class="chat-label">${escapeHtml(c.title || "New chat")}</span>
           <span class="chat-item-actions">
-            <span class="pin-chat ${c.pinned ? "pinned" : ""}" aria-label="Pin">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="${c.pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2"><path d="M12 17v5" stroke-linecap="round"/><path d="M5 3h14l-3 8v3H8v-3L5 3z" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="delete-chat" aria-label="Delete">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18" stroke-linecap="round"/><path d="M8 6V4h8v2" stroke-linecap="round"/><path d="m19 6-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
+            <button class="chat-more" aria-label="More">...</button>
           </span>
+          <div class="chat-menu">
+            <button class="chat-menu-item menu-rename" type="button">Rename</button>
+            <button class="chat-menu-item menu-pin" type="button">${c.pinned ? "Unpin" : "Pin"}</button>
+            <button class="chat-menu-item menu-share" type="button">Share</button>
+            <button class="chat-menu-item menu-delete danger" type="button">Delete</button>
+          </div>
         `;
 
         row.addEventListener("click", async (e) => {
-          const del = e.target.closest(".delete-chat");
-          const pin = e.target.closest(".pin-chat");
+          const menu = row.querySelector(".chat-menu");
+          const more = e.target.closest(".chat-more");
+          const rename = e.target.closest(".menu-rename");
+          const pin = e.target.closest(".menu-pin");
+          const share = e.target.closest(".menu-share");
+          const del = e.target.closest(".menu-delete");
+
+          if (more) {
+            e.stopPropagation();
+            document.querySelectorAll(".chat-menu.open").forEach((m) => {
+              if (m !== menu) m.classList.remove("open");
+            });
+            menu.classList.toggle("open");
+            return;
+          }
+          if (rename) {
+            e.stopPropagation();
+            menu.classList.remove("open");
+            const next = prompt("Rename chat:", c.title || "New chat");
+            if (!next) return;
+            const title = next.trim();
+            if (!title) return;
+            await apiJson(`/conversations/${c.id}/rename`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title }),
+            });
+            c.title = title;
+            if (activeChatId === c.id) chatTitle.textContent = title;
+            renderHistory();
+            return;
+          }
           if (pin) {
             e.stopPropagation();
+            menu.classList.remove("open");
             await apiJson(`/conversations/${c.id}/pin`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1451,8 +1528,23 @@
             renderHistory();
             return;
           }
+          if (share) {
+            e.stopPropagation();
+            menu.classList.remove("open");
+            const url = new URL(window.location.href);
+            url.searchParams.set("cid", c.id);
+            try {
+              if (navigator.share) {
+                await navigator.share({ title: c.title || "Asho AI chat", url: url.toString() });
+              } else {
+                await navigator.clipboard.writeText(url.toString());
+              }
+            } catch {}
+            return;
+          }
           if (del) {
             e.stopPropagation();
+            menu.classList.remove("open");
             await deleteConversation(c.id);
             return;
           }
@@ -1817,6 +1909,7 @@
       const data = await apiJson(`/conversations/${conversationId}`);
       const c = data.conversation;
       activeChatId = c.id;
+      setConversationUrl(c.id);
       chatTitle.textContent = c.title || "New chat";
       renderConversationMessages(c.messages || []);
       renderHistory();
@@ -1830,6 +1923,7 @@
           await selectConversation(chats[0].id);
         } else {
           activeChatId = null;
+          setConversationUrl(null);
           chatTitle.textContent = "Asho AI";
           clearMessages();
           refreshWelcome();
@@ -1883,6 +1977,7 @@
 
     newChatBtn.addEventListener("click", () => {
       activeChatId = null;
+      setConversationUrl(null);
       chatTitle.textContent = "New chat";
       clearMessages();
       refreshWelcome();
@@ -2036,7 +2131,10 @@
         input.focus();
       });
     }
-    document.addEventListener("click", () => toggleUserMenu(false));
+    document.addEventListener("click", () => {
+      toggleUserMenu(false);
+      document.querySelectorAll(".chat-menu.open").forEach((m) => m.classList.remove("open"));
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -2138,7 +2236,8 @@
     autoResize();
     loadAuthState().then(() => {
       if (AUTH_ENABLED && !currentUser) return;
-      return loadConversations(null, { autoSelectExisting: false });
+      const preferredId = new URLSearchParams(window.location.search).get("cid");
+      return loadConversations(preferredId, { autoSelectExisting: false });
     }).catch(() => {
       chatTitle.textContent = "Asho AI";
       clearMessages();

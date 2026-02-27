@@ -739,6 +739,31 @@ def pin_conversation(conversation_id):
             conn.close()
 
 
+@app.post("/conversations/<conversation_id>/rename")
+def rename_conversation(conversation_id):
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+    title = title[:80]
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            updated = conn.execute(
+                "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_sub=?",
+                (title, utc_now_iso(), conversation_id, user_sub),
+            ).rowcount
+            conn.commit()
+            if not updated:
+                return jsonify({"error": "conversation not found"}), 404
+            return jsonify({"ok": True, "title": title})
+        finally:
+            conn.close()
+
+
 @app.post("/conversations/<conversation_id>/regenerate")
 def regenerate_conversation(conversation_id):
     user_sub = require_user()
