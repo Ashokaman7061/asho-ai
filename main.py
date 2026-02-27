@@ -32,6 +32,7 @@ RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
 SARVAM_STT_URL_DEFAULT = "https://api.sarvam.ai/speech-to-text/transcribe"
 SARVAM_TTS_URL_DEFAULT = "https://api.sarvam.ai/text-to-speech/stream"
+SARVAM_API_KEY_DEFAULT = "sk_c4pxpobl_5YUeMwv36cV6djoLZPDeKDos"
 
 SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
@@ -281,6 +282,7 @@ def sarvam_headers():
         os.getenv("SARVAM_API_KEY", "").strip()
         or os.getenv("SARVAM_API_SUBSCRIPTION_KEY", "").strip()
         or os.getenv("API_SUBSCRIPTION_KEY", "").strip()
+        or SARVAM_API_KEY_DEFAULT
     )
     return {
         "api-subscription-key": api_key,
