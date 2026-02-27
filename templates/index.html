@@ -343,7 +343,25 @@
       gap: 8px;
     }
     .auth-box { display: flex; align-items: center; gap: 8px; }
-    .auth-name { font-size: 12px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+    .auth-name {
+      font-size: 13px;
+      color: var(--text);
+      max-width: 190px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      border-radius: 999px;
+      padding: 7px 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .auth-name:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+    .auth-name::after { content: "▾"; font-size: 11px; color: var(--muted); }
     .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
     .google-wrap { display: flex; justify-content: center; align-items: center; }
     .google-anchor { min-width: 46px; min-height: 46px; }
@@ -387,8 +405,8 @@
     }
     .settings-modal.open { display: flex; }
     .settings-card {
-      width: min(820px, 96vw);
-      max-height: 86vh;
+      width: min(600px, 96vw);
+      height: min(400px, 82vh);
       border: 1px solid var(--border);
       border-radius: 16px;
       background: var(--panel);
@@ -696,6 +714,9 @@
       }
       .login-card { padding: 20px 16px; border-radius: 16px; }
       .login-brand img { width: min(220px, 72vw); }
+      .settings-card { width: min(96vw, 600px); height: min(82vh, 460px); grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      .settings-nav { border-right: 0; border-bottom: 1px solid var(--border); display: flex; gap: 6px; overflow-x: auto; }
+      .settings-tab { margin-bottom: 0; white-space: nowrap; }
       .chat-title {
       display: none;
     }
