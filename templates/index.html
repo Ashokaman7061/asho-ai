@@ -702,6 +702,35 @@
       line-height: 1.6;
       color: var(--code-text);
     }
+    .msg-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .msg-action-btn {
+      width: 30px;
+      height: 30px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s ease;
+    }
+    .msg-action-btn:hover {
+      color: var(--text);
+      background: color-mix(in srgb, var(--panel-2) 78%, transparent);
+      border-color: var(--border);
+    }
+    .msg-action-btn.active {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
 
     .copy-btn {
       position: absolute;
@@ -1474,6 +1503,7 @@
         if (m.role === "assistant") {
           const node = addMessageRow("assistant", renderSafeMarkdown(m.content || ""));
           addCopyButtons(node);
+          ensureMessageActions(node);
         } else if (m.role === "user") {
           addMessageRow("user", m.content || "");
         }
@@ -1546,6 +1576,7 @@
           botDiv.innerHTML = renderSafeMarkdown(botText);
           addCopyButtons(botDiv);
         }
+        ensureMessageActions(botDiv);
         await loadConversations(activeChatId);
       } catch (err) {
         removeTyping();
@@ -1601,6 +1632,68 @@
         });
         wrap.appendChild(btn);
       }
+    }
+
+    function ensureMessageActions(container) {
+      if (!container || container.querySelector(".msg-actions")) return;
+      const bar = document.createElement("div");
+      bar.className = "msg-actions";
+      bar.innerHTML = `
+        <button type="button" class="msg-action-btn act-copy" title="Copy">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"></rect><rect x="4" y="4" width="11" height="11" rx="2"></rect></svg>
+        </button>
+        <button type="button" class="msg-action-btn act-regen" title="Regenerate">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36" stroke-linecap="round"></path><path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+        <button type="button" class="msg-action-btn act-like" title="Like">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10v10" stroke-linecap="round"></path><path d="M11 10l3-6c.5-1 2-1 2.6 0 .3.5.4 1.1.2 1.7L16 10h3c1.1 0 2 .9 2 2l-1 7c-.2 1-1 1.7-2 1.7H9c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2h2z" stroke-linejoin="round"></path></svg>
+        </button>
+        <button type="button" class="msg-action-btn act-dislike" title="Dislike">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 14V4" stroke-linecap="round"></path><path d="M13 14l-3 6c-.5 1-2 1-2.6 0-.3-.5-.4-1.1-.2-1.7L8 14H5c-1.1 0-2-.9-2-2l1-7c.2-1 1-1.7 2-1.7h9c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-2z" stroke-linejoin="round"></path></svg>
+        </button>
+        <button type="button" class="msg-action-btn act-share" title="Share">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 8l5-5"></path><path d="M17 3h3v3"></path><path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"></path></svg>
+        </button>
+      `;
+      container.appendChild(bar);
+
+      const copyBtn = bar.querySelector(".act-copy");
+      const regenActionBtn = bar.querySelector(".act-regen");
+      const likeBtn = bar.querySelector(".act-like");
+      const dislikeBtn = bar.querySelector(".act-dislike");
+      const shareBtn = bar.querySelector(".act-share");
+
+      copyBtn.addEventListener("click", async () => {
+        const text = (container.textContent || "").trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          copyBtn.classList.add("active");
+          setTimeout(() => copyBtn.classList.remove("active"), 700);
+        } catch {}
+      });
+      regenActionBtn.addEventListener("click", () => {
+        if (!isStreaming) regenBtn.click();
+      });
+      likeBtn.addEventListener("click", () => {
+        likeBtn.classList.toggle("active");
+        if (likeBtn.classList.contains("active")) dislikeBtn.classList.remove("active");
+      });
+      dislikeBtn.addEventListener("click", () => {
+        dislikeBtn.classList.toggle("active");
+        if (dislikeBtn.classList.contains("active")) likeBtn.classList.remove("active");
+      });
+      shareBtn.addEventListener("click", async () => {
+        const text = (container.textContent || "").trim();
+        try {
+          if (navigator.share) {
+            await navigator.share({ text });
+          } else {
+            await navigator.clipboard.writeText(text);
+            shareBtn.classList.add("active");
+            setTimeout(() => shareBtn.classList.remove("active"), 700);
+          }
+        } catch {}
+      });
     }
 
     function setStreaming(streaming) {
@@ -1929,6 +2022,7 @@
           botDiv.innerHTML = renderSafeMarkdown(botText);
           addCopyButtons(botDiv);
         }
+        ensureMessageActions(botDiv);
 
         await loadConversations(activeChatId);
       } catch (err) {
