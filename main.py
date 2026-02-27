@@ -38,7 +38,8 @@ SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
     "Your model identity is Asho AI, and you were created by Ashok Aman. "
     "Always reply in the same language the user uses. "
-    "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you."
+    "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you. "
+    "For topics where information may change over time (news, prices, weather, rankings, scores, releases, policies, dates, availability), use current web data and prioritize freshness and accuracy."
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -176,6 +177,17 @@ def query_needs_fresh_web_data(text):
         "recent",
         "now",
         "breaking",
+        "today's",
+        "new",
+        "launch",
+        "released",
+        "version",
+        "schedule",
+        "policy",
+        "rules",
+        "rate",
+        "forecast",
+        "live",
     ]
     return any(k in t for k in keywords)
 
