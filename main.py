@@ -92,6 +92,11 @@ def init_db():
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    user_sub TEXT PRIMARY KEY,
+                    profile_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             ensure_schema_columns(conn)
@@ -147,6 +152,79 @@ def title_from_text(text):
     if not words:
         return "New chat"
     return " ".join(words[:7])[:60]
+
+
+def get_user_profile(conn, user_sub):
+    row = conn.execute(
+        "SELECT profile_json FROM user_profiles WHERE user_sub=?",
+        (user_sub,),
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["profile_json"] or "{}")
+    except Exception:
+        return {}
+
+
+def save_user_profile(conn, user_sub, profile):
+    conn.execute(
+        """
+        INSERT INTO user_profiles (user_sub, profile_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_sub) DO UPDATE SET
+            profile_json=excluded.profile_json,
+            updated_at=excluded.updated_at
+        """,
+        (user_sub, json.dumps(profile, ensure_ascii=False), utc_now_iso()),
+    )
+
+
+def update_user_profile_from_message(profile, text):
+    msg = (text or "").strip()
+    if not msg:
+        return profile
+    p = dict(profile or {})
+
+    lc = msg.lower()
+    # Language preference heuristic
+    if any(w in lc for w in ["kya", "kaise", "nahi", "haan", "mujhe", "tum", "karna"]):
+        p["preferred_language"] = "hinglish"
+    elif all(ord(c) < 128 for c in msg):
+        p.setdefault("preferred_language", "english")
+
+    # Detail preference heuristic
+    if any(w in lc for w in ["step by step", "detail", "explain", "samjhao"]):
+        p["detail_level"] = "detailed"
+    elif any(w in lc for w in ["short", "brief", "jaldi", "one line"]):
+        p["detail_level"] = "concise"
+
+    # Topics of interest (very simple)
+    topics = set(p.get("topics", []))
+    for topic in ["deployment", "render", "flask", "ui", "security", "auth", "database", "api"]:
+        if topic in lc:
+            topics.add(topic)
+    if topics:
+        p["topics"] = sorted(topics)
+
+    return p
+
+
+def build_profile_context(profile):
+    if not profile:
+        return ""
+    lines = ["User preference memory (for better help quality):"]
+    lang = profile.get("preferred_language")
+    if lang:
+        lines.append(f"- Preferred language style: {lang}")
+    detail = profile.get("detail_level")
+    if detail:
+        lines.append(f"- Preferred response detail: {detail}")
+    topics = profile.get("topics") or []
+    if topics:
+        lines.append(f"- Frequent topics: {', '.join(topics[:8])}")
+    lines.append("Use this only to improve helpfulness and communication style.")
+    return "\n".join(lines)
 
 
 def maybe_auto_rename_title(conn, conversation_id, current_title):
@@ -245,7 +323,7 @@ def get_conversation_messages(conn, conversation_id):
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
-def build_model_messages_from_conversation(conn, conversation_id):
+def build_model_messages_from_conversation(conn, conversation_id, profile_context=""):
     model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
         conn, conversation_id
     )
@@ -253,7 +331,11 @@ def build_model_messages_from_conversation(conn, conversation_id):
         f"Current UTC datetime: {utc_now_iso()}. "
         "Use this as the authoritative current time reference in this conversation."
     )
-    return [model_messages[0], {"role": "system", "content": realtime_context}, *model_messages[1:]]
+    parts = [model_messages[0], {"role": "system", "content": realtime_context}]
+    if profile_context:
+        parts.append({"role": "system", "content": profile_context})
+    parts.extend(model_messages[1:])
+    return parts
 
 
 def is_auth_enabled():
@@ -693,6 +775,9 @@ def regenerate_conversation(conversation_id):
                     "UPDATE messages SET content=?, created_at=? WHERE id=?",
                     (edited_message, utc_now_iso(), last_user_id),
                 )
+                profile = get_user_profile(conn, user_sub)
+                profile = update_user_profile_from_message(profile, edited_message)
+                save_user_profile(conn, user_sub, profile)
             conn.execute(
                 "DELETE FROM messages WHERE conversation_id=? AND id>?",
                 (conversation_id, last_user_id),
@@ -702,7 +787,11 @@ def regenerate_conversation(conversation_id):
                 (utc_now_iso(), conversation_id),
             )
             current_title = maybe_auto_rename_title(conn, conversation_id, current_title)
-            model_messages = build_model_messages_from_conversation(conn, conversation_id)
+            profile = get_user_profile(conn, user_sub)
+            profile_context = build_profile_context(profile)
+            model_messages = build_model_messages_from_conversation(
+                conn, conversation_id, profile_context=profile_context
+            )
             conn.commit()
         finally:
             conn.close()
@@ -805,11 +894,17 @@ def chat_api():
                 "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
                 (conversation_id, "user", user_text, now),
             )
+            profile = get_user_profile(conn, user_sub)
+            profile = update_user_profile_from_message(profile, user_text)
+            save_user_profile(conn, user_sub, profile)
             conn.execute(
                 "UPDATE conversations SET updated_at=? WHERE id=?",
                 (now, conversation_id),
             )
-            model_messages = build_model_messages_from_conversation(conn, conversation_id)
+            profile_context = build_profile_context(profile)
+            model_messages = build_model_messages_from_conversation(
+                conn, conversation_id, profile_context=profile_context
+            )
             current_title = maybe_auto_rename_title(conn, conversation_id, current_title)
             conn.commit()
         finally:
