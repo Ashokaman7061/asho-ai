@@ -25,10 +25,6 @@ app.permanent_session_lifetime = timedelta(days=int(os.getenv("SESSION_DAYS", "3
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-REALTIME_SEARCH_API_KEY = os.getenv("REALTIME_SEARCH_API_KEY", "").strip()
-REALTIME_SEARCH_ENDPOINT = os.getenv("REALTIME_SEARCH_ENDPOINT", "https://serpapi.com/search.json").strip()
-REALTIME_SEARCH_MAX_RESULTS = int(os.getenv("REALTIME_SEARCH_MAX_RESULTS", "5"))
-REALTIME_SEARCH_TIMEOUT_SECONDS = int(os.getenv("REALTIME_SEARCH_TIMEOUT_SECONDS", "12"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
@@ -174,72 +170,6 @@ def stream_ollama_chat(messages):
             token = part.get("message", {}).get("content")
             if token:
                 yield token
-
-
-def needs_realtime_search(query):
-    q = (query or "").lower()
-    markers = [
-        "latest",
-        "today",
-        "current",
-        "news",
-        "update",
-        "price",
-        "date",
-        "when",
-        "kab",
-        "score",
-        "result",
-        "release",
-        "launch",
-        "exam",
-        "schedule",
-        "who is",
-        "ceo",
-        "president",
-    ]
-    return any(m in q for m in markers) or "?" in q
-
-
-def get_realtime_search_results(query):
-    if not REALTIME_SEARCH_API_KEY:
-        return []
-    params = {
-        "engine": "google",
-        "q": query,
-        "num": max(1, min(REALTIME_SEARCH_MAX_RESULTS, 10)),
-        "api_key": REALTIME_SEARCH_API_KEY,
-    }
-    try:
-        with httpx.Client(timeout=REALTIME_SEARCH_TIMEOUT_SECONDS) as client:
-            res = client.get(REALTIME_SEARCH_ENDPOINT, params=params)
-            res.raise_for_status()
-            payload = res.json()
-        items = []
-        for r in (payload.get("organic_results") or [])[: REALTIME_SEARCH_MAX_RESULTS]:
-            link = (r.get("link") or "").strip()
-            title = (r.get("title") or "").strip()
-            snippet = (r.get("snippet") or "").strip()
-            if not link or not title:
-                continue
-            items.append({"title": title, "link": link, "snippet": snippet})
-        return items
-    except Exception as exc:
-        app.logger.warning("realtime search failed: %s", exc)
-        return []
-
-
-def build_realtime_context(results):
-    if not results:
-        return ""
-    lines = ["Realtime web results (use when needed for current facts):"]
-    for idx, item in enumerate(results, start=1):
-        lines.append(f"{idx}. {item['title']}")
-        lines.append(f"   URL: {item['link']}")
-        if item.get("snippet"):
-            lines.append(f"   Snippet: {item['snippet']}")
-    lines.append("If using these facts, cite source URLs in your final answer.")
-    return "\n".join(lines)
 
 
 def client_ip():
@@ -748,19 +678,6 @@ def chat_api():
                 {"role": "system", "content": realtime_context},
                 *model_messages[1:],
             ]
-            if needs_realtime_search(user_text):
-                rt_results = get_realtime_search_results(user_text)
-                rt_context = build_realtime_context(rt_results)
-                if rt_context:
-                    model_messages = [
-                        model_messages[0],
-                        {
-                            "role": "system",
-                            "content": "For current/factual claims, prefer realtime web results and cite URLs.",
-                        },
-                        {"role": "system", "content": rt_context},
-                        *model_messages[1:],
-                    ]
             conn.commit()
         finally:
             conn.close()
