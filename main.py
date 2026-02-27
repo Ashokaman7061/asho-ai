@@ -8,6 +8,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+from duckduckgo_search import DDGS
+from duckduckgo_search.exceptions import (
+    DuckDuckGoSearchException,
+    RatelimitException,
+    TimeoutException,
+)
 from flask import Flask, Response, jsonify, render_template, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -25,8 +31,6 @@ app.permanent_session_lifetime = timedelta(days=int(os.getenv("SESSION_DAYS", "3
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
-GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "").strip()
-GOOGLE_SEARCH_CX = os.getenv("GOOGLE_SEARCH_CX", "").strip()
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "5"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
@@ -158,7 +162,7 @@ def get_ollama_chat_url():
 
 
 def web_search_enabled():
-    return bool(GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX)
+    return True
 
 
 def query_needs_fresh_web_data(text):
@@ -192,26 +196,42 @@ def query_needs_fresh_web_data(text):
     return any(k in t for k in keywords)
 
 
-def google_web_search(query, num=5):
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "key": GOOGLE_SEARCH_API_KEY,
-        "cx": GOOGLE_SEARCH_CX,
-        "q": query,
-        "num": max(1, min(num, 10)),
-        "safe": "active",
-    }
-    with httpx.Client(timeout=12.0) as client:
-        res = client.get(url, params=params)
-        res.raise_for_status()
-        payload = res.json()
+def web_search(query, num=5):
+    maxn = max(1, min(num, 10))
+    query_l = (query or "").lower()
+    is_news_query = any(k in query_l for k in ["news", "breaking", "headline", "latest"])
+    ddgs_proxy = os.getenv("DDGS_PROXY", "").strip() or None
+    ddgs = DDGS(proxy=ddgs_proxy, timeout=12)
+    try:
+        if is_news_query:
+            payload = ddgs.news(
+                keywords=query,
+                region="wt-wt",
+                safesearch="moderate",
+                timelimit="d",
+                max_results=maxn,
+            )
+        else:
+            payload = ddgs.text(
+                keywords=query,
+                region="wt-wt",
+                safesearch="moderate",
+                backend="auto",
+                max_results=maxn,
+            )
+    except (RatelimitException, TimeoutException, DuckDuckGoSearchException) as exc:
+        app.logger.warning("DDGS search failed: %s", exc)
+        return []
+    except Exception as exc:
+        app.logger.warning("DDGS unexpected error: %s", exc)
+        return []
     items = []
-    for item in payload.get("items", [])[:num]:
+    for item in (payload or [])[:maxn]:
         items.append(
             {
                 "title": item.get("title", ""),
-                "link": item.get("link", ""),
-                "snippet": item.get("snippet", ""),
+                "link": item.get("href", "") or item.get("url", ""),
+                "snippet": item.get("snippet", "") or item.get("body", ""),
             }
         )
     return items
@@ -745,7 +765,7 @@ def chat_api():
             )
             if web_search_enabled() and query_needs_fresh_web_data(user_text):
                 try:
-                    results = google_web_search(user_text, num=SEARCH_MAX_RESULTS)
+                    results = web_search(user_text, num=SEARCH_MAX_RESULTS)
                     web_context = build_web_context_message(results)
                     if web_context:
                         model_messages = [
