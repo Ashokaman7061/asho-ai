@@ -232,8 +232,14 @@ def require_user():
     return None
 
 
-def session_user_payload(user_sub, email=None, name=None, provider="local"):
-    return {"sub": user_sub, "email": email, "name": name, "provider": provider}
+def session_user_payload(user_sub, email=None, name=None, provider="local", picture=None):
+    return {
+        "sub": user_sub,
+        "email": email,
+        "name": name,
+        "provider": provider,
+        "picture": picture,
+    }
 
 
 @app.get("/")
@@ -271,6 +277,7 @@ def auth_google():
     provider_sub = info.get("sub")
     email = (info.get("email") or "").strip().lower()
     name = info.get("name")
+    picture = info.get("picture")
     with DB_LOCK:
         conn = get_db()
         try:
@@ -305,6 +312,7 @@ def auth_google():
         email=email,
         name=name,
         provider="google",
+        picture=picture,
     )
     return jsonify({"ok": True, "user": session["user"]})
 

@@ -343,6 +343,15 @@
       gap: 8px;
     }
     .auth-box { display: flex; align-items: center; gap: 8px; }
+    .auth-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      display: none;
+      background: var(--panel-2);
+    }
     .auth-name {
       font-size: 13px;
       color: var(--text);
@@ -772,6 +781,7 @@
 
       <div class="side-bottom">
         <div id="authBox" class="auth-box hidden-when-collapsed">
+          <img id="authAvatar" class="auth-avatar" alt="User avatar" />
           <span id="authName" class="auth-name" style="display:none;"></span>
         </div>
         <div id="userMenu" class="user-menu">
@@ -865,6 +875,7 @@
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
     const authName = document.getElementById("authName");
+    const authAvatar = document.getElementById("authAvatar");
     const userMenu = document.getElementById("userMenu");
     const menuSettings = document.getElementById("menuSettings");
     const menuHelp = document.getElementById("menuHelp");
@@ -977,16 +988,27 @@
       if (!AUTH_ENABLED) {
         googleSignInEl.style.display = "none";
         authName.style.display = "none";
+        authAvatar.style.display = "none";
+        authAvatar.removeAttribute("src");
         showAuthRequired(false);
         return;
       }
       if (currentUser) {
         authName.textContent = currentUser.name || currentUser.email || "Signed in";
         authName.style.display = "inline";
+        if (currentUser.picture) {
+          authAvatar.src = currentUser.picture;
+          authAvatar.style.display = "block";
+        } else {
+          authAvatar.style.display = "none";
+          authAvatar.removeAttribute("src");
+        }
         googleSignInEl.style.display = "none";
         showAuthRequired(false);
       } else {
         authName.style.display = "none";
+        authAvatar.style.display = "none";
+        authAvatar.removeAttribute("src");
         googleSignInEl.style.display = "block";
         showAuthRequired(true);
       }
