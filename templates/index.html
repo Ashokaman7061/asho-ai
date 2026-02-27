@@ -93,7 +93,8 @@
       text-align: left;
     }
     .login-brand { display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
-    .login-brand img { width: min(260px, 70vw); height: auto; object-fit: contain; display: block; }
+    .logo-full { width: min(260px, 70vw); height: auto; display: block; }
+    .logo-icon { width: 40px; height: 40px; display: block; }
     .login-title { font-size: 1.1rem; margin: 0 0 6px; text-align: center; }
     .login-sub { margin: 0 0 16px; color: #9ea8be; font-size: 14px; text-align: center; }
     .login-form { display: grid; gap: 10px; }
@@ -741,7 +742,7 @@
         margin-top: 92px;
       }
       .login-card { padding: 20px 16px; border-radius: 16px; }
-      .login-brand img { width: min(220px, 72vw); }
+      .logo-full { width: min(220px, 72vw); }
       .settings-card { width: min(96vw, 600px); height: min(82vh, 460px); grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
       .settings-nav { border-right: 0; border-bottom: 1px solid var(--border); display: flex; gap: 6px; overflow-x: auto; }
       .settings-tab { margin-bottom: 0; white-space: nowrap; }
@@ -752,12 +753,39 @@
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="ashoBlueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00f0ff"/>
+        <stop offset="100%" stop-color="#0066ff"/>
+      </linearGradient>
+      <filter id="ashoGlow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="4" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+      <symbol id="ashoLogoFull" viewBox="0 0 1200 400">
+        <polygon points="300,80 420,150 420,290 300,360 180,290 180,150" fill="none" stroke="url(#ashoBlueGradient)" stroke-width="10" filter="url(#ashoGlow)"/>
+        <path d="M300 120 L360 300 L330 300 L312 250 L288 250 L270 300 L240 300 Z M294 220 L306 220 L300 195 Z" fill="url(#ashoBlueGradient)" filter="url(#ashoGlow)"/>
+        <text x="500" y="240" font-size="120" font-family="Orbitron, Arial, sans-serif" font-weight="700">
+          <tspan fill="#FFFFFF">Asho</tspan>
+          <tspan fill="url(#ashoBlueGradient)" filter="url(#ashoGlow)">AI</tspan>
+        </text>
+      </symbol>
+      <symbol id="ashoLogoIcon" viewBox="140 70 320 320">
+        <polygon points="300,80 420,150 420,290 300,360 180,290 180,150" fill="none" stroke="url(#ashoBlueGradient)" stroke-width="10" filter="url(#ashoGlow)"/>
+        <path d="M300 120 L360 300 L330 300 L312 250 L288 250 L270 300 L240 300 Z M294 220 L306 220 L300 195 Z" fill="url(#ashoBlueGradient)" filter="url(#ashoGlow)"/>
+      </symbol>
+    </defs>
+  </svg>
   <div id="overlay" class="overlay"></div>
   <div class="layout">
     <div id="loginGate" class="login-gate">
       <div class="login-card">
         <div class="login-brand">
-          <img src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
+          <svg class="logo-full" viewBox="0 0 1200 400" aria-label="Asho AI logo" role="img"><use href="#ashoLogoFull"/></svg>
         </div>
         <h2 id="loginTitle" class="login-title">Sign in</h2>
         <p class="login-sub">Use your account to continue to Asho AI chat.</p>
@@ -788,7 +816,7 @@
           <span class="hidden-when-collapsed">New chat</span>
         </button>
         <button id="collapseBtn" class="icon-btn side-collapse" type="button" aria-label="Toggle sidebar">
-          <img class="toggle-logo" src="{{ url_for('static', filename='sidebar logo.png') }}" alt="Toggle sidebar" />
+          <svg class="logo-icon" viewBox="0 0 600 600" aria-label="Asho AI icon" role="img"><use href="#ashoLogoIcon"/></svg>
         </button>
       </div>
 
@@ -820,10 +848,10 @@
       <header class="header">
         <div class="header-left">
           <button id="desktopClosedToggle" class="icon-btn side-collapse desktop-closed-toggle" type="button" aria-label="Open sidebar">
-            <img class="toggle-logo" src="{{ url_for('static', filename='sidebar logo.png') }}" alt="Open sidebar" />
+            <svg class="logo-icon" viewBox="0 0 600 600" aria-label="Asho AI icon" role="img"><use href="#ashoLogoIcon"/></svg>
           </button>
           <button id="mobileToggle" class="mobile-toggle" type="button" aria-label="Open sidebar">
-            <img class="toggle-logo" src="{{ url_for('static', filename='sidebar logo.png') }}" alt="Open sidebar" />
+            <svg class="logo-icon" viewBox="0 0 600 600" aria-label="Asho AI icon" role="img"><use href="#ashoLogoIcon"/></svg>
           </button>
           
         </div>
@@ -839,7 +867,7 @@
 
       <section id="chat" class="messages-wrap">
         <div id="welcomePanel" class="welcome-panel">
-          <img class="welcome-mark" src="{{ url_for('static', filename='Ai logo.png') }}" alt="Asho AI logo" />
+          <svg class="welcome-mark" viewBox="0 0 1200 400" aria-label="Asho AI logo" role="img"><use href="#ashoLogoFull"/></svg>
         </div>
         <div id="authRequired" class="auth-required" style="display:none;">Please sign in to start chatting.</div>
       </section>
