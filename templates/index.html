@@ -1355,6 +1355,7 @@
     let activeAudio = null;
     let ttsAbortController = null;
     let recordAutoStopTimer = null;
+    let sttFailureCount = 0;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -2061,14 +2062,12 @@
       const fd = new FormData();
       fd.append("audio", blob, "voice.webm");
       fd.append("language_code", "unknown");
-      fd.append("with_diarization", "false");
-      fd.append("num_speakers", "2");
       const res = await fetch("/voice/stt", {
         method: "POST",
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "STT failed");
+      if (!res.ok) throw new Error(data.details || data.error || "STT failed");
       return (data.text || "").trim();
     }
 
@@ -2623,16 +2622,21 @@
       if (!blob.size) return;
       try {
         const text = await transcribeAudio(blob);
+        sttFailureCount = 0;
         if (!text) {
           addMessageRow("assistant", "No speech detected.");
           if (voiceConversationActive) await startRecording();
           return;
         }
         await sendMessage(text, true);
-      } catch {
-        addMessageRow("assistant", "Voice transcription failed.");
-        if (voiceConversationActive) {
+      } catch (err) {
+        sttFailureCount += 1;
+        addMessageRow("assistant", `Voice transcription failed: ${err?.message || "unknown error"}`);
+        if (voiceConversationActive && sttFailureCount < 3) {
           try { await startRecording(); } catch {}
+        } else if (voiceConversationActive && sttFailureCount >= 3) {
+          addMessageRow("assistant", "Voice mode stopped after repeated STT failures.");
+          stopAllVoiceActivity(true);
         }
       }
     }

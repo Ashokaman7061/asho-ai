@@ -32,7 +32,7 @@ RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
 SARVAM_STT_URL = os.getenv(
-    "SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text"
+    "SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text/transcribe"
 ).strip()
 SARVAM_TTS_URL = os.getenv(
     "SARVAM_TTS_URL", "https://api.sarvam.ai/text-to-speech/stream"
@@ -994,14 +994,14 @@ def voice_stt_api():
         return jsonify({"error": "audio file is required"}), 400
     filename = file.filename or "audio.webm"
     content_type = file.mimetype or "audio/webm"
-    files = {"file": (filename, file.stream, content_type)}
-    data = {
-        "model": "saaras:v3",
-        "mode": "transcribe",
-        "language_code": request.form.get("language_code", "unknown"),
-        "with_diarization": request.form.get("with_diarization", "false"),
-        "num_speakers": request.form.get("num_speakers", "2"),
-    }
+    audio_bytes = file.read()
+    if not audio_bytes:
+        return jsonify({"error": "empty audio"}), 400
+    files = {"file": (filename, audio_bytes, content_type)}
+    data = {"model": "saaras:v3", "mode": "transcribe"}
+    language_code = (request.form.get("language_code") or "unknown").strip()
+    if language_code:
+        data["language_code"] = language_code
     try:
         res = httpx.post(
             SARVAM_STT_URL,
@@ -1012,9 +1012,25 @@ def voice_stt_api():
         )
         res.raise_for_status()
         payload = res.json()
+    except httpx.HTTPStatusError as exc:
+        body = ""
+        try:
+            body = exc.response.text[:500]
+        except Exception:
+            body = ""
+        app.logger.warning("sarvam stt http error: %s %s", exc.response.status_code, body)
+        return (
+            jsonify(
+                {
+                    "error": f"stt provider error ({exc.response.status_code})",
+                    "details": body or "no provider details",
+                }
+            ),
+            502,
+        )
     except Exception as exc:
         app.logger.exception("sarvam stt failed: %s", exc)
-        return jsonify({"error": "stt request failed"}), 502
+        return jsonify({"error": "stt request failed", "details": str(exc)}), 502
     text = (
         payload.get("transcript")
         or payload.get("text")
