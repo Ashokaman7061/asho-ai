@@ -356,6 +356,11 @@
       transition: background .2s ease, border-color .2s ease;
     }
     .auth-trigger:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+    .auth-trigger.active {
+      background: color-mix(in srgb, var(--hover) 72%, var(--panel-2));
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
     .auth-user { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .auth-avatar {
       width: 34px;
@@ -958,7 +963,9 @@
     }
 
     function toggleUserMenu(show) {
-      userMenu.classList.toggle("open", show ?? !userMenu.classList.contains("open"));
+      const isOpen = show ?? !userMenu.classList.contains("open");
+      userMenu.classList.toggle("open", isOpen);
+      authTrigger.classList.toggle("active", isOpen);
     }
 
     function openSettings(tab = "general") {
