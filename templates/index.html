@@ -659,10 +659,13 @@
       background: var(--user-bubble);
       border-radius: 22px;
       padding: 11px 14px;
+      max-width: 100%;
+      width: fit-content;
     }
     .message.user .user-text {
       white-space: pre-wrap;
-      word-break: break-word;
+      word-break: normal;
+      overflow-wrap: break-word;
     }
 
     .message.assistant { width: 100%; }
@@ -737,8 +740,9 @@
     .user-msg-group {
       display: inline-flex;
       flex-direction: column;
-      align-items: center;
+      align-items: flex-end;
       gap: 8px;
+      max-width: 85%;
     }
     .msg-actions.user-actions {
       margin-top: 0;
