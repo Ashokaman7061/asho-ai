@@ -165,35 +165,13 @@ def web_search_enabled():
     return True
 
 
-def query_needs_fresh_web_data(text):
-    t = (text or "").lower()
-    keywords = [
-        "latest",
-        "current",
-        "today",
-        "news",
-        "price",
-        "stock",
-        "weather",
-        "score",
-        "result",
-        "update",
-        "recent",
-        "now",
-        "breaking",
-        "today's",
-        "new",
-        "launch",
-        "released",
-        "version",
-        "schedule",
-        "policy",
-        "rules",
-        "rate",
-        "forecast",
-        "live",
-    ]
-    return any(k in t for k in keywords)
+def should_try_web_search(text):
+    t = (text or "").strip().lower()
+    if len(t) < 4:
+        return False
+    if t in {"hi", "hello", "hey", "ok", "thanks", "thank you"}:
+        return False
+    return True
 
 
 def web_search(query, num=5):
@@ -763,7 +741,7 @@ def chat_api():
             model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
                 conn, conversation_id
             )
-            if web_search_enabled() and query_needs_fresh_web_data(user_text):
+            if web_search_enabled() and should_try_web_search(user_text):
                 try:
                     results = web_search(user_text, num=SEARCH_MAX_RESULTS)
                     web_context = build_web_context_message(results)
