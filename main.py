@@ -743,6 +743,7 @@ def chat_api():
     if is_rate_limited(ip):
         return jsonify({"error": "rate limit exceeded, try again later"}), 429
 
+    web_used = False
     with DB_LOCK:
         conn = get_db()
         try:
@@ -795,6 +796,7 @@ def chat_api():
                         r["page_summary"] = fetch_page_summary(r.get("link", ""))
                     web_context = build_web_context_message(results)
                     if web_context:
+                        web_used = True
                         web_instruction = (
                             "Use web context only when needed for factual/current/event/date claims. "
                             "For normal conversation, answer naturally without forcing web data. "
@@ -845,6 +847,7 @@ def chat_api():
     response = Response(generate(), mimetype="text/plain; charset=utf-8")
     response.headers["X-Conversation-Id"] = conversation_id
     response.headers["X-Conversation-Title"] = current_title
+    response.headers["X-Web-Search-Used"] = "1" if web_used else "0"
     return response
 
 
