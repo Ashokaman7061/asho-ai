@@ -659,7 +659,10 @@
       background: var(--user-bubble);
       border-radius: 22px;
       padding: 11px 14px;
+    }
+    .message.user .user-text {
       white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .message.assistant { width: 100%; }
@@ -731,9 +734,20 @@
       border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
+    .user-msg-group {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
     .msg-actions.user-actions {
-      justify-content: flex-end;
-      margin-top: 8px;
+      margin-top: 0;
+      gap: 4px;
+    }
+    .message.user .msg-action-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
     }
 
     .copy-btn {
@@ -1495,7 +1509,7 @@
       if (kind === "assistant") {
         msg.innerHTML = htmlText;
       } else {
-        msg.textContent = htmlText;
+        msg.innerHTML = `<span class="user-text">${escapeHtml(htmlText || "")}</span>`;
       }
       row.appendChild(msg);
       chat.appendChild(row);
@@ -1707,7 +1721,18 @@
     }
 
     function ensureUserMessageActions(container) {
-      if (!container || container.querySelector(".msg-actions")) return;
+      if (!container) return;
+      const row = container.parentElement;
+      if (!row) return;
+      let group = row.querySelector(".user-msg-group");
+      if (!group) {
+        group = document.createElement("div");
+        group.className = "user-msg-group";
+        row.replaceChild(group, container);
+        group.appendChild(container);
+      }
+      if (group.querySelector(".msg-actions")) return;
+
       const bar = document.createElement("div");
       bar.className = "msg-actions user-actions";
       bar.innerHTML = `
@@ -1718,12 +1743,12 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>
         </button>
       `;
-      container.appendChild(bar);
+      group.appendChild(bar);
 
       const copyBtn = bar.querySelector(".usr-copy");
       const editBtn = bar.querySelector(".usr-edit");
       copyBtn.addEventListener("click", async () => {
-        const text = (container.textContent || "").trim();
+        const text = (container.querySelector(".user-text")?.textContent || "").trim();
         try {
           await navigator.clipboard.writeText(text);
           copyBtn.classList.add("active");
@@ -1731,7 +1756,7 @@
         } catch {}
       });
       editBtn.addEventListener("click", () => {
-        const text = (container.textContent || "").trim();
+        const text = (container.querySelector(".user-text")?.textContent || "").trim();
         input.value = text;
         autoResize();
         input.focus();
