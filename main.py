@@ -519,6 +519,35 @@ def list_conversations():
             conn.close()
 
 
+@app.get("/conversations/export")
+def export_conversations():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            rows = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM conversations WHERE user_sub=? ORDER BY updated_at DESC",
+                (user_sub,),
+            ).fetchall()
+            conversations = []
+            for row in rows:
+                messages = get_conversation_messages(conn, row["id"])
+                conversations.append(
+                    {
+                        "id": row["id"],
+                        "title": row["title"] or "New chat",
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                        "messages": messages,
+                    }
+                )
+            return jsonify({"exported_at": utc_now_iso(), "conversations": conversations})
+        finally:
+            conn.close()
+
+
 @app.post("/conversations")
 def create_conversation_api():
     user_sub = require_user()

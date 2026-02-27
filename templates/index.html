@@ -505,6 +505,21 @@
       text-align: center;
     }
     .profile-btn:hover { background: rgba(162,65,77,.15); }
+    .data-actions { display: grid; gap: 10px; }
+    .data-btn {
+      border-radius: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-size: 14px;
+    }
+    .data-btn:hover { background: var(--hover); }
+    .data-btn.danger { border-color: #71323b; color: #ffb0bb; background: rgba(129,38,53,.18); }
+    .data-btn.danger:hover { background: rgba(129,38,53,.3); }
+    .data-note { font-size: 12px; color: var(--muted); }
 
     .mobile-toggle {
       display: none;
@@ -972,7 +987,11 @@
           </div>
         </div>
         <div id="paneData" class="settings-pane">
-          Conversation export and delete controls can be added here.
+          <div class="data-actions">
+            <button id="exportDataBtn" class="data-btn" type="button">Export conversations (JSON)</button>
+            <button id="deleteAllDataBtn" class="data-btn danger" type="button">Delete all conversations</button>
+            <div id="dataStatus" class="data-note"></div>
+          </div>
         </div>
         <div id="paneAbout" class="settings-pane">
           Asho AI - your personal AI assistant platform.
@@ -1005,6 +1024,9 @@
     const profileEmail = document.getElementById("profileEmail");
     const logoutBtn = document.getElementById("logoutBtn");
     const deleteAccountBtn = document.getElementById("deleteAccountBtn");
+    const exportDataBtn = document.getElementById("exportDataBtn");
+    const deleteAllDataBtn = document.getElementById("deleteAllDataBtn");
+    const dataStatus = document.getElementById("dataStatus");
     const settingsModal = document.getElementById("settingsModal");
     const settingsClose = document.getElementById("settingsClose");
     const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
@@ -1100,6 +1122,11 @@
       const name = v.slice(0, at);
       const domain = v.slice(at);
       return `${name.slice(0, 3)}******${name.slice(-3)}${domain}`;
+    }
+
+    function setDataStatus(text, isError = false) {
+      dataStatus.textContent = text || "";
+      dataStatus.style.color = isError ? "#ff8f98" : "";
     }
 
     async function apiJson(url, options = {}) {
@@ -1579,6 +1606,44 @@
       clearMessages();
       refreshWelcome();
       renderHistory();
+    });
+    exportDataBtn.addEventListener("click", async () => {
+      setDataStatus("Preparing export...");
+      try {
+        const res = await fetch("/conversations/export");
+        if (!res.ok) throw new Error("export failed");
+        const payload = await res.json();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        a.href = url;
+        a.download = `asho-ai-conversations-${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setDataStatus("Export complete.");
+      } catch {
+        setDataStatus("Export failed.", true);
+      }
+    });
+    deleteAllDataBtn.addEventListener("click", async () => {
+      const ok = confirm("Delete all your conversations permanently?");
+      if (!ok) return;
+      setDataStatus("Deleting conversations...");
+      try {
+        const res = await fetch("/reset", { method: "POST" });
+        if (!res.ok) throw new Error("delete failed");
+        activeChatId = null;
+        chats = [];
+        clearMessages();
+        refreshWelcome();
+        renderHistory();
+        setDataStatus("All conversations deleted.");
+      } catch {
+        setDataStatus("Delete failed.", true);
+      }
     });
     settingsClose.addEventListener("click", closeSettings);
     settingsModal.addEventListener("click", (e) => {
