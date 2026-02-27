@@ -1354,6 +1354,7 @@
     let isAudioPlaying = false;
     let activeAudio = null;
     let ttsAbortController = null;
+    let recordAutoStopTimer = null;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -2021,14 +2022,26 @@
       sendBtn.innerHTML = streaming ? stopIcon : sendIcon;
     }
 
-    function stopAllVoiceActivity() {
+    function stopAllVoiceActivity(hardStop = true) {
+      if (hardStop) {
+        voiceConversationActive = false;
+      }
+      if (recordAutoStopTimer) {
+        clearTimeout(recordAutoStopTimer);
+        recordAutoStopTimer = null;
+      }
       if (mediaRecorder && isRecording) {
         try { mediaRecorder.stop(); } catch {}
       }
       isRecording = false;
       voiceToggleBtn.classList.remove("recording");
-      voiceToggleBtn.classList.remove("active");
-      voiceToggleBtn.setAttribute("aria-label", "Start voice conversation");
+      if (hardStop) {
+        voiceToggleBtn.classList.remove("active");
+        voiceToggleBtn.setAttribute("aria-label", "Start voice conversation");
+      } else {
+        voiceToggleBtn.classList.add("active");
+        voiceToggleBtn.setAttribute("aria-label", "Stop voice conversation");
+      }
       if (mediaStream) {
         mediaStream.getTracks().forEach((t) => t.stop());
         mediaStream = null;
@@ -2082,13 +2095,79 @@
         const msg = await response.text().catch(() => "");
         throw new Error(msg || `TTS failed (${response.status})`);
       }
-      const chunks = [];
       const reader = response.body?.getReader();
       if (!reader) return;
+
+      if ("MediaSource" in window && MediaSource.isTypeSupported("audio/mpeg")) {
+        const mediaSource = new MediaSource();
+        const url = URL.createObjectURL(mediaSource);
+        const audio = new Audio(url);
+        activeAudio = audio;
+        isAudioPlaying = true;
+
+        await new Promise((resolve) => {
+          const queue = [];
+          let sourceBuffer = null;
+          let streamEnded = false;
+          let audioEnded = false;
+
+          const maybeDone = () => {
+            if (streamEnded && audioEnded) {
+              isAudioPlaying = false;
+              activeAudio = null;
+              URL.revokeObjectURL(url);
+              resolve();
+            }
+          };
+
+          const flushQueue = () => {
+            if (!sourceBuffer || sourceBuffer.updating || !queue.length) return;
+            sourceBuffer.appendBuffer(queue.shift());
+          };
+
+          mediaSource.addEventListener("sourceopen", async () => {
+            sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+            sourceBuffer.mode = "sequence";
+            sourceBuffer.addEventListener("updateend", () => {
+              flushQueue();
+              if (streamEnded && !sourceBuffer.updating && queue.length === 0) {
+                try { mediaSource.endOfStream(); } catch {}
+              }
+            });
+            audio.play().catch(() => {});
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value?.length) {
+                queue.push(value);
+                flushQueue();
+              }
+            }
+            streamEnded = true;
+            flushQueue();
+            if (!sourceBuffer.updating && queue.length === 0) {
+              try { mediaSource.endOfStream(); } catch {}
+            }
+            maybeDone();
+          }, { once: true });
+
+          audio.onended = () => {
+            audioEnded = true;
+            maybeDone();
+          };
+          audio.onerror = () => {
+            audioEnded = true;
+            maybeDone();
+          };
+        });
+        return;
+      }
+
+      const chunks = [];
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        chunks.push(value);
+        if (value?.length) chunks.push(value);
       }
       const blob = new Blob(chunks, { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
@@ -2125,6 +2204,12 @@
       };
       mediaRecorder.start();
       isRecording = true;
+      if (recordAutoStopTimer) clearTimeout(recordAutoStopTimer);
+      recordAutoStopTimer = setTimeout(() => {
+        if (voiceConversationActive && isRecording) {
+          stopRecordingAndSend().catch(() => {});
+        }
+      }, 3200);
       voiceToggleBtn.classList.add("recording");
       voiceToggleBtn.classList.add("active");
       voiceToggleBtn.setAttribute("aria-label", "Stop voice conversation");
@@ -2255,8 +2340,7 @@
     });
     voiceToggleBtn.addEventListener("click", async () => {
       if (voiceConversationActive) {
-        voiceConversationActive = false;
-        stopAllVoiceActivity();
+        stopAllVoiceActivity(true);
         if (controller) controller.abort();
         return;
       }
@@ -2445,7 +2529,7 @@
         return;
       }
       if (fromVoice) {
-        stopAllVoiceActivity();
+        stopAllVoiceActivity(false);
       }
 
       setStreaming(true);
@@ -2521,6 +2605,10 @@
 
     async function stopRecordingAndSend() {
       if (!mediaRecorder || !isRecording) return;
+      if (recordAutoStopTimer) {
+        clearTimeout(recordAutoStopTimer);
+        recordAutoStopTimer = null;
+      }
       await new Promise((resolve) => {
         mediaRecorder.onstop = resolve;
         mediaRecorder.stop();
