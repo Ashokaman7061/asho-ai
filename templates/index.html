@@ -343,9 +343,23 @@
       gap: 8px;
     }
     .auth-box { display: flex; align-items: center; gap: 8px; }
+    .auth-trigger {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      border-radius: 16px;
+      padding: 8px 10px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .auth-trigger:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+    .auth-user { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .auth-avatar {
-      width: 28px;
-      height: 28px;
+      width: 34px;
+      height: 34px;
       border-radius: 50%;
       object-fit: cover;
       border: 1px solid var(--border);
@@ -360,17 +374,17 @@
       overflow: hidden;
       text-overflow: ellipsis;
       cursor: pointer;
-      border: 1px solid var(--border);
-      background: var(--panel-2);
-      border-radius: 999px;
-      padding: 7px 11px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background .2s ease, border-color .2s ease;
+      display: block;
     }
-    .auth-name:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
-    .auth-name::after { content: "▾"; font-size: 11px; color: var(--muted); }
+    .auth-more {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+    }
     .logout-btn { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 9px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
     .google-wrap { display: flex; justify-content: center; align-items: center; }
     .google-anchor { min-width: 46px; min-height: 46px; }
@@ -781,8 +795,13 @@
 
       <div class="side-bottom">
         <div id="authBox" class="auth-box hidden-when-collapsed">
-          <img id="authAvatar" class="auth-avatar" alt="User avatar" />
-          <span id="authName" class="auth-name" style="display:none;"></span>
+          <div id="authTrigger" class="auth-trigger">
+            <div class="auth-user">
+              <img id="authAvatar" class="auth-avatar" alt="User avatar" />
+              <span id="authName" class="auth-name"></span>
+            </div>
+            <button id="authMoreBtn" class="auth-more" type="button" aria-label="Open menu">...</button>
+          </div>
         </div>
         <div id="userMenu" class="user-menu">
           <button id="menuSettings" class="menu-item" type="button">Settings</button>
@@ -875,6 +894,8 @@
     const chatTitle = document.getElementById("chatTitle");
     const newChatBtn = document.getElementById("newChat");
     const authName = document.getElementById("authName");
+    const authTrigger = document.getElementById("authTrigger");
+    const authMoreBtn = document.getElementById("authMoreBtn");
     const authAvatar = document.getElementById("authAvatar");
     const userMenu = document.getElementById("userMenu");
     const menuSettings = document.getElementById("menuSettings");
@@ -987,7 +1008,7 @@
       currentUser = user || null;
       if (!AUTH_ENABLED) {
         googleSignInEl.style.display = "none";
-        authName.style.display = "none";
+        authTrigger.style.display = "none";
         authAvatar.style.display = "none";
         authAvatar.removeAttribute("src");
         showAuthRequired(false);
@@ -995,7 +1016,7 @@
       }
       if (currentUser) {
         authName.textContent = currentUser.name || currentUser.email || "Signed in";
-        authName.style.display = "inline";
+        authTrigger.style.display = "flex";
         if (currentUser.picture) {
           authAvatar.src = currentUser.picture;
           authAvatar.style.display = "block";
@@ -1006,7 +1027,7 @@
         googleSignInEl.style.display = "none";
         showAuthRequired(false);
       } else {
-        authName.style.display = "none";
+        authTrigger.style.display = "none";
         authAvatar.style.display = "none";
         authAvatar.removeAttribute("src");
         googleSignInEl.style.display = "block";
@@ -1384,7 +1405,12 @@
       passToggleBtn.textContent = visible ? "Show" : "Hide";
       passToggleBtn.setAttribute("aria-label", visible ? "Show password" : "Hide password");
     });
-    authName.addEventListener("click", (e) => {
+    authTrigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!currentUser) return;
+      toggleUserMenu();
+    });
+    authMoreBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (!currentUser) return;
       toggleUserMenu();
