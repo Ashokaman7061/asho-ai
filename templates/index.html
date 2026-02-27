@@ -463,6 +463,24 @@
     .settings-close { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
     .settings-pane { display: none; color: var(--muted); font-size: 14px; line-height: 1.6; }
     .settings-pane.active { display: block; }
+    .profile-list { display: grid; gap: 10px; }
+    .profile-item { border: 1px solid var(--border); background: var(--panel-2); border-radius: 10px; padding: 10px; }
+    .profile-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .profile-value { font-size: 14px; color: var(--text); }
+    .profile-actions { margin-top: 14px; display: grid; gap: 8px; }
+    .danger-btn, .ghost-btn {
+      border-radius: 10px;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-size: 14px;
+    }
+    .danger-btn { border-color: #71323b; color: #ffb0bb; background: rgba(129,38,53,.18); }
+    .danger-btn:hover { background: rgba(129,38,53,.3); }
+    .ghost-btn:hover { background: var(--hover); }
 
     .mobile-toggle {
       display: none;
@@ -902,7 +920,21 @@
           Theme and interface preferences will appear here.
         </div>
         <div id="paneProfile" class="settings-pane">
-          Profile details for your account will appear here.
+          <div class="profile-list">
+            <div class="profile-item">
+              <span class="profile-label">Name</span>
+              <span id="profileName" class="profile-value">user name</span>
+            </div>
+            <div class="profile-item">
+              <span class="profile-label">Email address</span>
+              <span id="profileEmail" class="profile-value">ash******097@gmail.com</span>
+            </div>
+          </div>
+          <div class="profile-actions">
+            <button id="logoutAllBtn" class="ghost-btn" type="button">Log out of all devices</button>
+            <button id="logoutBtn" class="ghost-btn" type="button">Log out</button>
+            <button id="deleteAccountBtn" class="danger-btn" type="button">Delete account</button>
+          </div>
         </div>
         <div id="paneData" class="settings-pane">
           Conversation export and delete controls can be added here.
@@ -934,6 +966,11 @@
     const menuSettings = document.getElementById("menuSettings");
     const menuHelp = document.getElementById("menuHelp");
     const menuLogout = document.getElementById("menuLogout");
+    const profileName = document.getElementById("profileName");
+    const profileEmail = document.getElementById("profileEmail");
+    const logoutAllBtn = document.getElementById("logoutAllBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const deleteAccountBtn = document.getElementById("deleteAccountBtn");
     const settingsModal = document.getElementById("settingsModal");
     const settingsClose = document.getElementById("settingsClose");
     const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
@@ -1014,6 +1051,15 @@
       paneAbout.classList.toggle("active", tab === "about");
     }
 
+    function maskEmail(email) {
+      const v = String(email || "").trim();
+      const at = v.indexOf("@");
+      if (at <= 2) return v || "Not available";
+      const name = v.slice(0, at);
+      const domain = v.slice(at);
+      return `${name.slice(0, 3)}******${name.slice(-3)}${domain}`;
+    }
+
     async function apiJson(url, options = {}) {
       const res = await fetch(url, options);
       let payload = {};
@@ -1051,6 +1097,8 @@
       }
       if (currentUser) {
         authName.textContent = currentUser.name || currentUser.email || "Signed in";
+        profileName.textContent = currentUser.name || "user name";
+        profileEmail.textContent = maskEmail(currentUser.email || "");
         authTrigger.style.display = "flex";
         if (currentUser.picture) {
           authAvatar.src = currentUser.picture;
@@ -1062,6 +1110,8 @@
         googleSignInEl.style.display = "none";
         showAuthRequired(false);
       } else {
+        profileName.textContent = "user name";
+        profileEmail.textContent = "Not available";
         authTrigger.style.display = "none";
         authAvatar.style.display = "none";
         authAvatar.removeAttribute("src");
@@ -1458,6 +1508,35 @@
     menuLogout.addEventListener("click", async () => {
       toggleUserMenu(false);
       await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+      updateAuthUI(null);
+      activeChatId = null;
+      clearMessages();
+      refreshWelcome();
+      renderHistory();
+    });
+    logoutBtn.addEventListener("click", async () => {
+      await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+      closeSettings();
+      updateAuthUI(null);
+      activeChatId = null;
+      clearMessages();
+      refreshWelcome();
+      renderHistory();
+    });
+    logoutAllBtn.addEventListener("click", async () => {
+      await fetch("/auth/logout_all", { method: "POST" }).catch(() => {});
+      closeSettings();
+      updateAuthUI(null);
+      activeChatId = null;
+      clearMessages();
+      refreshWelcome();
+      renderHistory();
+    });
+    deleteAccountBtn.addEventListener("click", async () => {
+      const ok = confirm("Delete account permanently? This will remove your profile and all chat data.");
+      if (!ok) return;
+      await fetch("/auth/delete", { method: "POST" }).catch(() => {});
+      closeSettings();
       updateAuthUI(null);
       activeChatId = null;
       clearMessages();

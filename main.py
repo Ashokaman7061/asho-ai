@@ -75,6 +75,7 @@ def init_db():
                     display_name TEXT,
                     provider TEXT NOT NULL DEFAULT 'local',
                     provider_sub TEXT,
+                    session_nonce INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -102,6 +103,9 @@ def ensure_schema_columns(conn):
     cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
     if "user_sub" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN user_sub TEXT NOT NULL DEFAULT 'public'")
+    user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "session_nonce" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN session_nonce INTEGER NOT NULL DEFAULT 0")
 
 
 def migrate_legacy_json_if_needed(conn):
@@ -227,18 +231,38 @@ def current_user_sub():
 
 def require_user():
     sub = current_user_sub()
-    if sub:
+    if not sub:
+        return None
+    if not AUTH_REQUIRED:
         return sub
-    return None
+    try:
+        user_id = int(sub.split(":", 1)[1])
+    except Exception:
+        session.pop("user", None)
+        return None
+    expected_nonce = int((session.get("user") or {}).get("session_nonce") or 0)
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            row = conn.execute("SELECT session_nonce FROM users WHERE id=?", (user_id,)).fetchone()
+        finally:
+            conn.close()
+    if not row or int(row["session_nonce"] or 0) != expected_nonce:
+        session.pop("user", None)
+        return None
+    return sub
 
 
-def session_user_payload(user_sub, email=None, name=None, provider="local", picture=None):
+def session_user_payload(
+    user_sub, email=None, name=None, provider="local", picture=None, session_nonce=0
+):
     return {
         "sub": user_sub,
         "email": email,
         "name": name,
         "provider": provider,
         "picture": picture,
+        "session_nonce": int(session_nonce or 0),
     }
 
 
@@ -296,14 +320,19 @@ def auth_google():
                 now = utc_now_iso()
                 conn.execute(
                     """
-                    INSERT INTO users (email, password_hash, display_name, provider, provider_sub, created_at)
-                    VALUES (?, NULL, ?, 'google', ?, ?)
+                    INSERT INTO users (email, password_hash, display_name, provider, provider_sub, session_nonce, created_at)
+                    VALUES (?, NULL, ?, 'google', ?, 0, ?)
                     """,
                     (email or f"google_{provider_sub}@example.local", name, provider_sub, now),
                 )
                 user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                session_nonce = 0
             else:
                 user_id = row["id"]
+                nonce_row = conn.execute(
+                    "SELECT session_nonce FROM users WHERE id=?", (user_id,)
+                ).fetchone()
+                session_nonce = int((nonce_row["session_nonce"] if nonce_row else 0) or 0)
             conn.commit()
         finally:
             conn.close()
@@ -313,6 +342,7 @@ def auth_google():
         name=name,
         provider="google",
         picture=picture,
+        session_nonce=session_nonce,
     )
     return jsonify({"ok": True, "user": session["user"]})
 
@@ -337,8 +367,8 @@ def auth_register():
                 return jsonify({"error": "email already registered"}), 409
             conn.execute(
                 """
-                INSERT INTO users (email, password_hash, display_name, provider, provider_sub, created_at)
-                VALUES (?, ?, ?, 'local', NULL, ?)
+                INSERT INTO users (email, password_hash, display_name, provider, provider_sub, session_nonce, created_at)
+                VALUES (?, ?, ?, 'local', NULL, 0, ?)
                 """,
                 (email, password_hash, name or email.split("@")[0], now),
             )
@@ -351,6 +381,7 @@ def auth_register():
         email=email,
         name=name or email.split("@")[0],
         provider="local",
+        session_nonce=0,
     )
     return jsonify({"ok": True, "user": session["user"]})
 
@@ -366,7 +397,7 @@ def auth_login():
         conn = get_db()
         try:
             row = conn.execute(
-                "SELECT id, password_hash, display_name, provider FROM users WHERE email=?",
+                "SELECT id, password_hash, display_name, provider, session_nonce FROM users WHERE email=?",
                 (email,),
             ).fetchone()
         finally:
@@ -380,12 +411,56 @@ def auth_login():
         email=email,
         name=row["display_name"] or email.split("@")[0],
         provider=row["provider"] or "local",
+        session_nonce=int(row["session_nonce"] or 0),
     )
     return jsonify({"ok": True, "user": session["user"]})
 
 
 @app.post("/auth/logout")
 def auth_logout():
+    session.pop("user", None)
+    return jsonify({"ok": True})
+
+
+@app.post("/auth/logout_all")
+def auth_logout_all():
+    sub = current_user_sub()
+    if not sub or ":" not in sub:
+        return jsonify({"error": "auth required"}), 401
+    user_id = int(sub.split(":", 1)[1])
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            conn.execute(
+                "UPDATE users SET session_nonce = session_nonce + 1 WHERE id=?",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    session.pop("user", None)
+    return jsonify({"ok": True})
+
+
+@app.post("/auth/delete")
+def auth_delete():
+    sub = current_user_sub()
+    if not sub or ":" not in sub:
+        return jsonify({"error": "auth required"}), 401
+    user_id = int(sub.split(":", 1)[1])
+    user_sub = f"user:{user_id}"
+    with DB_LOCK:
+        conn = get_db()
+        try:
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_sub=?)",
+                (user_sub,),
+            )
+            conn.execute("DELETE FROM conversations WHERE user_sub=?", (user_sub,))
+            conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+            conn.commit()
+        finally:
+            conn.close()
     session.pop("user", None)
     return jsonify({"ok": True})
 
