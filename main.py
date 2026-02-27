@@ -3,7 +3,7 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,6 +19,8 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me-in-production")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("COOKIE_SECURE", "1") == "1"
+app.config["SESSION_PERMANENT"] = True
+app.permanent_session_lifetime = timedelta(days=int(os.getenv("SESSION_DAYS", "30")))
 
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
@@ -266,6 +268,12 @@ def session_user_payload(
     }
 
 
+def login_user(user_payload):
+    session.clear()
+    session.permanent = True
+    session["user"] = user_payload
+
+
 @app.get("/")
 def index():
     return render_template(
@@ -336,13 +344,15 @@ def auth_google():
             conn.commit()
         finally:
             conn.close()
-    session["user"] = session_user_payload(
+    login_user(
+        session_user_payload(
         f"user:{user_id}",
         email=email,
         name=name,
         provider="google",
         picture=picture,
         session_nonce=session_nonce,
+        )
     )
     return jsonify({"ok": True, "user": session["user"]})
 
@@ -376,12 +386,14 @@ def auth_register():
             conn.commit()
         finally:
             conn.close()
-    session["user"] = session_user_payload(
+    login_user(
+        session_user_payload(
         f"user:{user_id}",
         email=email,
         name=name or email.split("@")[0],
         provider="local",
         session_nonce=0,
+        )
     )
     return jsonify({"ok": True, "user": session["user"]})
 
@@ -406,12 +418,14 @@ def auth_login():
         return jsonify({"error": "invalid email or password"}), 401
     if not check_password_hash(row["password_hash"], password):
         return jsonify({"error": "invalid email or password"}), 401
-    session["user"] = session_user_payload(
+    login_user(
+        session_user_payload(
         f"user:{row['id']}",
         email=email,
         name=row["display_name"] or email.split("@")[0],
         provider=row["provider"] or "local",
         session_nonce=int(row["session_nonce"] or 0),
+        )
     )
     return jsonify({"ok": True, "user": session["user"]})
 
