@@ -2094,10 +2094,16 @@
         const msg = await response.text().catch(() => "");
         throw new Error(msg || `TTS failed (${response.status})`);
       }
+      const contentTypeHeader = (response.headers.get("content-type") || "").toLowerCase();
+      const audioMime = contentTypeHeader.includes("wav")
+        ? "audio/wav"
+        : contentTypeHeader.includes("mpeg")
+          ? "audio/mpeg"
+          : "audio/mpeg";
       const reader = response.body?.getReader();
       if (!reader) return;
 
-      if ("MediaSource" in window && MediaSource.isTypeSupported("audio/mpeg")) {
+      if (audioMime === "audio/mpeg" && "MediaSource" in window && MediaSource.isTypeSupported("audio/mpeg")) {
         const mediaSource = new MediaSource();
         const url = URL.createObjectURL(mediaSource);
         const audio = new Audio(url);
@@ -2168,7 +2174,7 @@
         if (done) break;
         if (value?.length) chunks.push(value);
       }
-      const blob = new Blob(chunks, { type: "audio/mpeg" });
+      const blob = new Blob(chunks, { type: audioMime });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       activeAudio = audio;
@@ -2554,8 +2560,18 @@
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
+          let errMsg = "Request failed.";
+          try {
+            const j = await res.clone().json();
+            errMsg = j?.error || errMsg;
+          } catch {
+            try {
+              const t = await res.text();
+              if (t) errMsg = t;
+            } catch {}
+          }
           removeTyping();
-          addMessageRow("assistant", "Request failed.");
+          addMessageRow("assistant", errMsg);
           return;
         }
         const responseConversationId = res.headers.get("X-Conversation-Id");
@@ -2583,15 +2599,15 @@
         if (fromVoice && botText.trim()) {
           try {
             await speakWithSarvam(botText.trim());
-          } catch {
-            addMessageRow("assistant", "TTS failed.");
+          } catch (err) {
+            addMessageRow("assistant", `TTS failed: ${err?.message || "unknown error"}`);
           }
           shouldResumeVoiceLoop = voiceConversationActive;
         }
       } catch (err) {
         removeTyping();
         if (err.name === "AbortError") addMessageRow("assistant", "Stopped.");
-        else addMessageRow("assistant", "Request failed.");
+        else addMessageRow("assistant", err?.message || "Request failed.");
       } finally {
         controller = undefined;
         setStreaming(false);

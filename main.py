@@ -1100,24 +1100,49 @@ def voice_tts_api():
         "enable_preprocessing": bool(payload.get("enable_preprocessing", True)),
     }
 
+    try:
+        client = httpx.Client(timeout=180.0)
+        req = client.build_request(
+            "POST",
+            sarvam_tts_url(),
+            headers={**sarvam_headers(), "Content-Type": "application/json"},
+            json=req_payload,
+        )
+        upstream = client.send(req, stream=True)
+    except Exception as exc:
+        app.logger.exception("sarvam tts request init failed: %s", exc)
+        return jsonify({"error": "tts request failed", "details": str(exc)}), 502
+
+    if upstream.status_code >= 400:
+        body = ""
+        try:
+            body = upstream.text[:500]
+        except Exception:
+            body = ""
+        upstream.close()
+        client.close()
+        return (
+            jsonify(
+                {
+                    "error": f"tts provider error ({upstream.status_code})",
+                    "details": body or "no provider details",
+                }
+            ),
+            502,
+        )
+
+    content_type = upstream.headers.get("content-type", "audio/mpeg")
+
     def generate():
         try:
-            with httpx.stream(
-                "POST",
-                sarvam_tts_url(),
-                headers={**sarvam_headers(), "Content-Type": "application/json"},
-                json=req_payload,
-                timeout=180.0,
-            ) as res:
-                res.raise_for_status()
-                for chunk in res.iter_bytes():
-                    if chunk:
-                        yield chunk
-        except Exception as exc:
-            app.logger.exception("sarvam tts failed: %s", exc)
-            return
+            for chunk in upstream.iter_bytes():
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+            client.close()
 
-    return Response(generate(), mimetype="audio/mpeg")
+    return Response(generate(), mimetype=content_type)
 
 
 @app.post("/reset")
