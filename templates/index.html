@@ -731,6 +731,10 @@
       border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
+    .msg-actions.user-actions {
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
 
     .copy-btn {
       position: absolute;
@@ -1505,7 +1509,8 @@
           addCopyButtons(node);
           ensureMessageActions(node);
         } else if (m.role === "user") {
-          addMessageRow("user", m.content || "");
+          const node = addMessageRow("user", m.content || "");
+          ensureUserMessageActions(node);
         }
       }
       applyMessageSearch();
@@ -1693,6 +1698,40 @@
             setTimeout(() => shareBtn.classList.remove("active"), 700);
           }
         } catch {}
+      });
+    }
+
+    function ensureUserMessageActions(container) {
+      if (!container || container.querySelector(".msg-actions")) return;
+      const bar = document.createElement("div");
+      bar.className = "msg-actions user-actions";
+      bar.innerHTML = `
+        <button type="button" class="msg-action-btn usr-copy" title="Copy">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"></rect><rect x="4" y="4" width="11" height="11" rx="2"></rect></svg>
+        </button>
+        <button type="button" class="msg-action-btn usr-edit" title="Edit">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>
+        </button>
+      `;
+      container.appendChild(bar);
+
+      const copyBtn = bar.querySelector(".usr-copy");
+      const editBtn = bar.querySelector(".usr-edit");
+      copyBtn.addEventListener("click", async () => {
+        const text = (container.textContent || "").trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          copyBtn.classList.add("active");
+          setTimeout(() => copyBtn.classList.remove("active"), 700);
+        } catch {}
+      });
+      editBtn.addEventListener("click", () => {
+        const text = (container.textContent || "").trim();
+        input.value = text;
+        autoResize();
+        input.focus();
+        editBtn.classList.add("active");
+        setTimeout(() => editBtn.classList.remove("active"), 700);
       });
     }
 
@@ -1973,7 +2012,8 @@
       setStreaming(true);
       input.value = "";
       autoResize();
-      addMessageRow("user", text);
+      const userNode = addMessageRow("user", text);
+      ensureUserMessageActions(userNode);
 
       removeTyping();
       addTyping();
