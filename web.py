@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ _executor = ThreadPoolExecutor(max_workers=6)
 LLM_TIMEOUT_SECONDS = 45.0
 SEARCH_RESULTS_PER_QUERY = 5
 FINAL_TOP_K = 5
+MAX_PLAN_STEPS = 5
 
 TRUSTED_DOMAINS = {
     "reuters.com",
@@ -287,6 +289,188 @@ Return STRICT JSON only:
     return [r for _, r in scored[:FINAL_TOP_K]]
 
 
+async def create_plan(system_prompt, user_query, ollama_url, model_name, headers=None):
+    prompt = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": f"""
+Break this user request into execution steps.
+
+User Query:
+{user_query}
+
+Return STRICT JSON:
+{{
+  "steps": [
+    {{"type": "search|reasoning|math", "instruction": "short step instruction"}}
+  ]
+}}
+
+Rules:
+- Max {MAX_PLAN_STEPS} steps
+- Use "search" when external/current facts are needed
+- Use "math" only for numeric calculations
+- Use "reasoning" for explanation/logic
+""",
+        },
+    ]
+    try:
+        content = await _call_ollama_chat(prompt, ollama_url, model_name, headers=headers)
+        payload = json.loads(content)
+        out = []
+        for s in payload.get("steps", []):
+            stype = str(s.get("type", "")).strip().lower()
+            instr = str(s.get("instruction", "")).strip()
+            if stype not in {"search", "reasoning", "math"} or not instr:
+                continue
+            out.append({"type": stype, "instruction": instr})
+        return out[:MAX_PLAN_STEPS]
+    except Exception:
+        return [{"type": "search", "instruction": user_query}]
+
+
+def _safe_eval_math(expression):
+    allowed_binops = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod, ast.FloorDiv)
+    allowed_unary = (ast.UAdd, ast.USub)
+
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, allowed_unary):
+            val = _eval(node.operand)
+            return +val if isinstance(node.op, ast.UAdd) else -val
+        if isinstance(node, ast.BinOp) and isinstance(node.op, allowed_binops):
+            a = _eval(node.left)
+            b = _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return a + b
+            if isinstance(node.op, ast.Sub):
+                return a - b
+            if isinstance(node.op, ast.Mult):
+                return a * b
+            if isinstance(node.op, ast.Div):
+                return a / b
+            if isinstance(node.op, ast.Pow):
+                return a**b
+            if isinstance(node.op, ast.Mod):
+                return a % b
+            if isinstance(node.op, ast.FloorDiv):
+                return a // b
+        raise ValueError("unsupported expression")
+
+    tree = ast.parse(expression, mode="eval")
+    return _eval(tree)
+
+
+async def _run_search_step(system_prompt, step_instruction, ollama_url, model_name, headers=None):
+    queries = await expand_queries(
+        system_prompt,
+        step_instruction,
+        ollama_url,
+        model_name,
+        headers=headers,
+    )
+    raw_results = await parallel_search(queries)
+    filtered = filter_and_dedupe_results(raw_results)
+    reranked = await rerank_results(
+        system_prompt,
+        step_instruction,
+        filtered,
+        ollama_url,
+        model_name,
+        headers=headers,
+    )
+    return reranked[:FINAL_TOP_K]
+
+
+async def execute_plan(system_prompt, user_query, plan_steps, ollama_url, model_name, headers=None):
+    artifacts = []
+    for idx, step in enumerate(plan_steps, 1):
+        stype = step["type"]
+        instruction = step["instruction"]
+        if stype == "search":
+            try:
+                results = await _run_search_step(
+                    system_prompt, instruction, ollama_url, model_name, headers=headers
+                )
+                artifacts.append(
+                    {
+                        "step": idx,
+                        "type": stype,
+                        "instruction": instruction,
+                        "results": results,
+                    }
+                )
+            except Exception:
+                artifacts.append(
+                    {"step": idx, "type": stype, "instruction": instruction, "results": []}
+                )
+        elif stype == "math":
+            try:
+                value = _safe_eval_math(instruction)
+                artifacts.append(
+                    {
+                        "step": idx,
+                        "type": stype,
+                        "instruction": instruction,
+                        "output": str(value),
+                    }
+                )
+            except Exception:
+                artifacts.append(
+                    {
+                        "step": idx,
+                        "type": stype,
+                        "instruction": instruction,
+                        "output": "Unable to compute safely",
+                    }
+                )
+        else:
+            # Reasoning steps are executed by the final response pass using all artifacts.
+            artifacts.append({"step": idx, "type": stype, "instruction": instruction})
+    return artifacts
+
+
+def build_planner_messages(system_prompt, original_query, plan_steps, artifacts):
+    lines = ["Execution Plan:"]
+    for s in plan_steps:
+        lines.append(f"- {s['type']}: {s['instruction']}")
+
+    lines.append("\nStep Outputs:")
+    citation_idx = 1
+    for a in artifacts:
+        lines.append(f"\nStep {a['step']} [{a['type']}]: {a['instruction']}")
+        if a.get("output"):
+            lines.append(f"Output: {a['output']}")
+        for r in a.get("results", [])[:FINAL_TOP_K]:
+            lines.append(f"[{citation_idx}] {r.get('title', '')}")
+            lines.append(f"URL: {r.get('link', '')}")
+            lines.append(f"Snippet: {r.get('snippet', '')}")
+            citation_idx += 1
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": f"""
+User Question:
+{original_query}
+
+{chr(10).join(lines)}
+
+Instructions:
+- Answer using the plan and step outputs
+- Cite web facts with [n] when available
+- If data is missing, say clearly not confirmed
+- Keep answer concise and accurate
+""",
+        },
+    ]
+
+
 def build_search_messages(system_prompt, original_query, search_results):
     combined_text = ""
     for idx, r in enumerate(search_results, 1):
@@ -327,6 +511,37 @@ async def intelligent_search_pipeline(
     model_name,
     headers=None,
 ):
+    plan_steps = await create_plan(
+        system_prompt,
+        user_query,
+        ollama_url,
+        model_name,
+        headers=headers,
+    )
+    if not plan_steps:
+        return None
+
+    artifacts = await execute_plan(
+        system_prompt,
+        user_query,
+        plan_steps,
+        ollama_url,
+        model_name,
+        headers=headers,
+    )
+
+    has_search_results = any(a.get("results") for a in artifacts)
+    if not has_search_results:
+        analysis = await analyze_query_intent(
+            system_prompt,
+            user_query,
+            ollama_url,
+            model_name,
+            headers=headers,
+        )
+        if not analysis.get("needs_search", True):
+            return None
+
     analysis = await analyze_query_intent(
         system_prompt,
         user_query,
@@ -334,34 +549,26 @@ async def intelligent_search_pipeline(
         model_name,
         headers=headers,
     )
-    if not analysis.get("needs_search", True):
-        return None
+    if analysis.get("needs_search", True) and not has_search_results:
+        # Fallback direct search path if planner produced no web artifacts.
+        queries = await expand_queries(
+            system_prompt,
+            user_query,
+            ollama_url,
+            model_name,
+            headers=headers,
+        )
+        raw_results = await parallel_search(queries)
+        filtered = filter_and_dedupe_results(raw_results)
+        reranked = await rerank_results(
+            system_prompt,
+            user_query,
+            filtered,
+            ollama_url,
+            model_name,
+            headers=headers,
+        )
+        if reranked:
+            return build_search_messages(system_prompt, user_query, reranked)
 
-    queries = await expand_queries(
-        system_prompt,
-        user_query,
-        ollama_url,
-        model_name,
-        headers=headers,
-    )
-
-    raw_results = await parallel_search(queries)
-    if not raw_results:
-        return None
-
-    filtered = filter_and_dedupe_results(raw_results)
-    if not filtered:
-        return None
-
-    reranked = await rerank_results(
-        system_prompt,
-        user_query,
-        filtered,
-        ollama_url,
-        model_name,
-        headers=headers,
-    )
-    if not reranked:
-        return None
-
-    return build_search_messages(system_prompt, user_query, reranked)
+    return build_planner_messages(system_prompt, user_query, plan_steps, artifacts)
