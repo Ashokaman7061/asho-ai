@@ -320,6 +320,9 @@
     .chat-menu-item:hover { background: var(--hover); }
     .chat-menu-item svg { flex: 0 0 auto; opacity: .9; }
     .chat-menu-item.danger { color: #ff8f98; }
+    .chat-menu-item.danger:hover {
+      background: color-mix(in srgb, #ff8f98 12%, transparent);
+    }
 
     .chat-item:hover, .chat-item.active {
       background: var(--hover);
@@ -1516,10 +1519,18 @@
           if (rename) {
             e.stopPropagation();
             menu.classList.remove("open");
-            const next = prompt("Rename chat:", c.title || "New chat");
-            if (!next) return;
-            const title = next.trim();
-            if (!title) return;
+            const next = prompt("Rename conversation:", c.title || "New chat");
+            if (next === null) return;
+            const title = next.trim().replace(/\s+/g, " ");
+            if (!title) {
+              alert("Title cannot be empty.");
+              return;
+            }
+            if (title.length > 80) {
+              alert("Title should be 80 characters or less.");
+              return;
+            }
+            if (title === (c.title || "New chat")) return;
             await apiJson(`/conversations/${c.id}/rename`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1560,6 +1571,10 @@
           if (del) {
             e.stopPropagation();
             menu.classList.remove("open");
+            const ok = confirm(
+              `Delete this conversation permanently?\n\n"${c.title || "New chat"}"\n\nThis action cannot be undone.`
+            );
+            if (!ok) return;
             await deleteConversation(c.id);
             return;
           }
