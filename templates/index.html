@@ -520,6 +520,26 @@
     .data-btn.danger { border-color: #71323b; color: #ffb0bb; background: rgba(129,38,53,.18); }
     .data-btn.danger:hover { background: rgba(129,38,53,.3); }
     .data-note { font-size: 12px; color: var(--muted); }
+    .about-list { display: grid; }
+    .about-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .about-label { font-size: 16px; color: var(--text); }
+    .about-view {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .about-view:hover { background: var(--hover); }
 
     .mobile-toggle {
       display: none;
@@ -994,7 +1014,16 @@
           </div>
         </div>
         <div id="paneAbout" class="settings-pane">
-          Asho AI - your personal AI assistant platform.
+          <div class="about-list">
+            <div class="about-row">
+              <span class="about-label">Terms of Use</span>
+              <button id="viewTermsBtn" class="about-view" type="button">View</button>
+            </div>
+            <div class="about-row" style="border-bottom:0;">
+              <span class="about-label">Privacy Policy</span>
+              <button id="viewPrivacyBtn" class="about-view" type="button">View</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1035,6 +1064,8 @@
     const paneProfile = document.getElementById("paneProfile");
     const paneData = document.getElementById("paneData");
     const paneAbout = document.getElementById("paneAbout");
+    const viewTermsBtn = document.getElementById("viewTermsBtn");
+    const viewPrivacyBtn = document.getElementById("viewPrivacyBtn");
     const authForm = document.getElementById("authForm");
     const authNameInput = document.getElementById("authNameInput");
     const authEmailInput = document.getElementById("authEmailInput");
@@ -1644,6 +1675,12 @@
       } catch {
         setDataStatus("Delete failed.", true);
       }
+    });
+    viewTermsBtn.addEventListener("click", () => {
+      alert("Terms of Use page will be added here.");
+    });
+    viewPrivacyBtn.addEventListener("click", () => {
+      alert("Privacy Policy page will be added here.");
     });
     settingsClose.addEventListener("click", closeSettings);
     settingsModal.addEventListener("click", (e) => {
