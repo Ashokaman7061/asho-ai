@@ -1357,6 +1357,11 @@
     let recordAutoStopTimer = null;
     let sttFailureCount = 0;
     const MAX_VOICE_TEXT_CHARS = 600;
+    const SARVAM_ALLOWED_LANGS = new Set([
+      "unknown", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN",
+      "ta-IN", "te-IN", "en-IN", "gu-IN", "as-IN", "ur-IN", "ne-IN", "kok-IN",
+      "ks-IN", "sd-IN", "sa-IN", "sat-IN", "mni-IN", "brx-IN", "mai-IN", "doi-IN"
+    ]);
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -2060,8 +2065,9 @@
     }
 
     async function transcribeAudio(blob) {
-      const browserLang = (navigator.language || "hi-IN").trim();
-      const langHint = /^[a-z]{2}-[A-Z]{2}$/.test(browserLang) ? browserLang : "hi-IN";
+      const browserLang = (navigator.language || "").trim();
+      const normalizedLang = browserLang.replace("_", "-");
+      const langHint = SARVAM_ALLOWED_LANGS.has(normalizedLang) ? normalizedLang : "unknown";
       const fd = new FormData();
       fd.append("audio", blob, "voice.webm");
       fd.append("language_code", langHint);
