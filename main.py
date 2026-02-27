@@ -3,9 +3,7 @@ import logging
 import os
 import sqlite3
 import threading
-import wave
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,7 +11,6 @@ import httpx
 from flask import Flask, Response, jsonify, render_template, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
-from vosk import KaldiRecognizer, Model
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__, static_folder="static", static_url_path="/assets")
@@ -33,10 +30,6 @@ AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
-STT_MAX_AUDIO_BYTES = int(os.getenv("STT_MAX_AUDIO_BYTES", str(10 * 1024 * 1024)))
-VOSK_MODEL_PATH = os.getenv(
-    "VOSK_MODEL_PATH", str((Path(__file__).resolve().parent / "models" / "vosk-model-small-en-us-0.15"))
-).strip()
 
 SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
@@ -53,8 +46,6 @@ LEGACY_JSON_PATH = BASE_DIR / "data" / "conversations.json"
 DB_LOCK = threading.Lock()
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMIT_STATE = {}
-VOSK_MODEL_LOCK = threading.Lock()
-VOSK_MODEL_INSTANCE = None
 
 
 def utc_now_iso():
@@ -264,46 +255,6 @@ def get_ollama_chat_url():
         return "https://ollama.com/api/chat"
     host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     return host + "/api/chat"
-
-
-def get_vosk_model():
-    global VOSK_MODEL_INSTANCE
-    if VOSK_MODEL_INSTANCE is not None:
-        return VOSK_MODEL_INSTANCE
-    model_path = Path(VOSK_MODEL_PATH)
-    if not model_path.exists():
-        return None
-    with VOSK_MODEL_LOCK:
-        if VOSK_MODEL_INSTANCE is None:
-            VOSK_MODEL_INSTANCE = Model(str(model_path))
-    return VOSK_MODEL_INSTANCE
-
-
-def transcribe_wav_bytes(audio_bytes):
-    model = get_vosk_model()
-    if model is None:
-        return None, "vosk model not found"
-    try:
-        with wave.open(BytesIO(audio_bytes), "rb") as wf:
-            if wf.getnchannels() != 1:
-                return None, "audio must be mono wav"
-            if wf.getsampwidth() != 2:
-                return None, "audio must be 16-bit pcm wav"
-            sample_rate = wf.getframerate()
-            rec = KaldiRecognizer(model, sample_rate)
-            rec.SetWords(False)
-            while True:
-                chunk = wf.readframes(4000)
-                if not chunk:
-                    break
-                rec.AcceptWaveform(chunk)
-            final = json.loads(rec.FinalResult() or "{}")
-            return (final.get("text") or "").strip(), None
-    except wave.Error:
-        return None, "invalid wav audio"
-    except Exception:
-        app.logger.exception("stt failed")
-        return None, "stt failed"
 
 
 def stream_ollama_chat(messages):
@@ -1016,27 +967,6 @@ def chat_api():
     response.headers["X-Conversation-Id"] = conversation_id
     response.headers["X-Conversation-Title"] = current_title
     return response
-
-
-@app.post("/stt")
-def stt_api():
-    user_sub = require_user()
-    if not user_sub:
-        return jsonify({"error": "auth required"}), 401
-    file = request.files.get("audio")
-    if not file:
-        return jsonify({"error": "audio file is required"}), 400
-    audio_bytes = file.read()
-    if not audio_bytes:
-        return jsonify({"error": "empty audio"}), 400
-    if len(audio_bytes) > STT_MAX_AUDIO_BYTES:
-        return jsonify({"error": "audio too large"}), 413
-    text, err = transcribe_wav_bytes(audio_bytes)
-    if err == "vosk model not found":
-        return jsonify({"error": "stt model not configured on server"}), 503
-    if err:
-        return jsonify({"error": err}), 400
-    return jsonify({"text": text})
 
 
 @app.post("/reset")

@@ -29,7 +29,6 @@ $env:SEARCH_TIMEOUT_SECONDS="12"
 $env:DDGS_PROXY=""
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
-$env:VOSK_MODEL_PATH="models/vosk-model-small-en-us-0.15"
 ```
 
 5. Run app.
@@ -54,7 +53,6 @@ python main.py
 - `DDGS_PROXY=<optional-proxy-url>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
-- `VOSK_MODEL_PATH=models/vosk-model-small-en-us-0.15`
 - `MAX_MESSAGE_CHARS=4000`
 - `RATE_LIMIT_WINDOW_SECONDS=60`
 - `RATE_LIMIT_MAX_REQUESTS=20`
@@ -81,9 +79,3 @@ If empty, app stays public mode and uses shared `public` conversations.
 App uses `duckduckgo_search` (DDGS) for live web lookup.
 For queries needing fresh data (latest/current/today/news/price etc.), app auto-fetches snippets/news and provides them to the model.
 Optional: set `DDGS_PROXY` for proxy-based traffic if needed.
-
-## Voice Input (Vosk STT)
-
-Frontend microphone button records short audio and sends WAV to backend `/stt`.
-Backend uses local Vosk model path from `VOSK_MODEL_PATH`.
-Download a Vosk model and place it at that path (or update env var) before using voice input.

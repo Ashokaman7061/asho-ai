@@ -974,25 +974,6 @@
       background: #df3e3e;
       color: #fff;
     }
-    #listenBtn {
-      width: 36px;
-      height: 36px;
-      border: 1px solid var(--border);
-      border-radius: 50%;
-      background: var(--panel-2);
-      color: var(--muted);
-      cursor: pointer;
-      display: grid;
-      place-items: center;
-      transition: all .2s ease;
-      flex: 0 0 auto;
-    }
-    #listenBtn:hover { background: var(--hover); color: var(--text); }
-    #listenBtn.is-listening {
-      background: #df3e3e;
-      color: #fff;
-      border-color: transparent;
-    }
 
     .hidden-when-collapsed { display: inline; }
     .sidebar.closed .hidden-when-collapsed { display: none; }
@@ -1160,13 +1141,6 @@
       <div class="input-bar">
         <form id="f" class="input-inner">
           <textarea id="q" rows="1" placeholder="Ask anything"></textarea>
-          <button type="button" id="listenBtn" aria-label="Start listening">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="3" width="6" height="12" rx="3"></rect>
-              <path d="M5 11a7 7 0 0 0 14 0"></path>
-              <path d="M12 18v3"></path>
-            </svg>
-          </button>
           <button type="submit" id="sendBtn" aria-label="Send">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h13" stroke-linecap="round" />
@@ -1322,7 +1296,6 @@
     const welcomePanel = document.getElementById("welcomePanel");
     const form = document.getElementById("f");
     const input = document.getElementById("q");
-    const listenBtn = document.getElementById("listenBtn");
     const sendBtn = document.getElementById("sendBtn");
     const sendIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13" stroke-linecap="round"></path><path d="m12 5 7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
     const stopIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"></rect></svg>';
@@ -1341,12 +1314,6 @@
     let currentUser = null;
     let authMode = "signin";
     let pendingAction = null;
-    let isListening = false;
-    let sttAudioContext = null;
-    let sttStream = null;
-    let sttProcessor = null;
-    let sttChunks = [];
-    let sttSampleRate = 44100;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -1436,7 +1403,6 @@
       loginGate.style.display = show ? "grid" : "none";
       input.disabled = show;
       sendBtn.disabled = show;
-      listenBtn.disabled = show;
       newChatBtn.disabled = show;
     }
 
@@ -2008,104 +1974,9 @@
     function setStreaming(streaming) {
       isStreaming = streaming;
       input.disabled = streaming;
-      listenBtn.disabled = streaming;
       sendBtn.classList.toggle("is-stop", streaming);
       sendBtn.setAttribute("aria-label", streaming ? "Stop" : "Send");
       sendBtn.innerHTML = streaming ? stopIcon : sendIcon;
-    }
-
-    function encodeWavFromFloat32(chunks, sampleRate) {
-      const length = chunks.reduce((sum, arr) => sum + arr.length, 0);
-      const buffer = new ArrayBuffer(44 + length * 2);
-      const view = new DataView(buffer);
-      let offset = 0;
-      const writeString = (s) => {
-        for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
-        offset += s.length;
-      };
-      writeString("RIFF");
-      view.setUint32(offset, 36 + length * 2, true); offset += 4;
-      writeString("WAVE");
-      writeString("fmt ");
-      view.setUint32(offset, 16, true); offset += 4;
-      view.setUint16(offset, 1, true); offset += 2;
-      view.setUint16(offset, 1, true); offset += 2;
-      view.setUint32(offset, sampleRate, true); offset += 4;
-      view.setUint32(offset, sampleRate * 2, true); offset += 4;
-      view.setUint16(offset, 2, true); offset += 2;
-      view.setUint16(offset, 16, true); offset += 2;
-      writeString("data");
-      view.setUint32(offset, length * 2, true); offset += 4;
-      let i16 = offset;
-      for (const chunk of chunks) {
-        for (let i = 0; i < chunk.length; i++) {
-          const s = Math.max(-1, Math.min(1, chunk[i]));
-          view.setInt16(i16, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-          i16 += 2;
-        }
-      }
-      return new Blob([view], { type: "audio/wav" });
-    }
-
-    async function stopListeningAndTranscribe() {
-      if (!isListening) return;
-      isListening = false;
-      listenBtn.classList.remove("is-listening");
-      listenBtn.setAttribute("aria-label", "Start listening");
-      if (sttProcessor) {
-        try { sttProcessor.disconnect(); } catch {}
-      }
-      if (sttAudioContext) {
-        try { await sttAudioContext.close(); } catch {}
-      }
-      if (sttStream) {
-        sttStream.getTracks().forEach((t) => t.stop());
-      }
-      const chunks = sttChunks.slice();
-      sttChunks = [];
-      sttProcessor = null;
-      sttAudioContext = null;
-      sttStream = null;
-      if (!chunks.length) return;
-      const audioBlob = encodeWavFromFloat32(chunks, sttSampleRate);
-      const fd = new FormData();
-      fd.append("audio", audioBlob, "speech.wav");
-      try {
-        const res = await fetch("/stt", { method: "POST", body: fd });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "STT failed");
-        const transcript = (data.text || "").trim();
-        if (transcript) {
-          input.value = (input.value ? `${input.value} ` : "") + transcript;
-          autoResize();
-          input.focus();
-        }
-      } catch (err) {
-        addMessageRow("assistant", `Voice transcription failed: ${err.message || "error"}`);
-      }
-    }
-
-    async function startListening() {
-      if (isStreaming || isListening) return;
-      try {
-        sttStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        sttAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-        sttSampleRate = sttAudioContext.sampleRate || 44100;
-        const source = sttAudioContext.createMediaStreamSource(sttStream);
-        sttProcessor = sttAudioContext.createScriptProcessor(4096, 1, 1);
-        sttChunks = [];
-        sttProcessor.onaudioprocess = (e) => {
-          const channel = e.inputBuffer.getChannelData(0);
-          sttChunks.push(new Float32Array(channel));
-        };
-        source.connect(sttProcessor);
-        sttProcessor.connect(sttAudioContext.destination);
-        isListening = true;
-        listenBtn.classList.add("is-listening");
-        listenBtn.setAttribute("aria-label", "Stop listening");
-      } catch {
-        addMessageRow("assistant", "Microphone access blocked or unavailable.");
-      }
     }
 
     function applyTheme(theme, persistTheme = true) {
@@ -2229,13 +2100,6 @@
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         form.requestSubmit();
-      }
-    });
-    listenBtn.addEventListener("click", async () => {
-      if (isListening) {
-        await stopListeningAndTranscribe();
-      } else {
-        await startListening();
       }
     });
 
@@ -2410,9 +2274,6 @@
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (isListening) {
-        await stopListeningAndTranscribe();
-      }
       if (isStreaming) {
         if (controller) controller.abort();
         return;
