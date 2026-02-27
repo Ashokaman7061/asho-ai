@@ -25,6 +25,9 @@ app.permanent_session_lifetime = timedelta(days=int(os.getenv("SESSION_DAYS", "3
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "ministral-3:14b-cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "").strip()
+GOOGLE_SEARCH_CX = os.getenv("GOOGLE_SEARCH_CX", "").strip()
+SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "5"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
@@ -151,6 +154,67 @@ def get_ollama_chat_url():
         return "https://ollama.com/api/chat"
     host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     return host + "/api/chat"
+
+
+def web_search_enabled():
+    return bool(GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX)
+
+
+def query_needs_fresh_web_data(text):
+    t = (text or "").lower()
+    keywords = [
+        "latest",
+        "current",
+        "today",
+        "news",
+        "price",
+        "stock",
+        "weather",
+        "score",
+        "result",
+        "update",
+        "recent",
+        "now",
+        "breaking",
+    ]
+    return any(k in t for k in keywords)
+
+
+def google_web_search(query, num=5):
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "key": GOOGLE_SEARCH_API_KEY,
+        "cx": GOOGLE_SEARCH_CX,
+        "q": query,
+        "num": max(1, min(num, 10)),
+        "safe": "active",
+    }
+    with httpx.Client(timeout=12.0) as client:
+        res = client.get(url, params=params)
+        res.raise_for_status()
+        payload = res.json()
+    items = []
+    for item in payload.get("items", [])[:num]:
+        items.append(
+            {
+                "title": item.get("title", ""),
+                "link": item.get("link", ""),
+                "snippet": item.get("snippet", ""),
+            }
+        )
+    return items
+
+
+def build_web_context_message(results):
+    if not results:
+        return ""
+    lines = ["Web search results (use these for up-to-date facts):"]
+    for i, r in enumerate(results, start=1):
+        lines.append(f"{i}. {r['title']}")
+        lines.append(f"   URL: {r['link']}")
+        lines.append(f"   Snippet: {r['snippet']}")
+    lines.append("When possible, cite the URL(s) you used in your final answer.")
+    return "\n".join(lines)
 
 
 def stream_ollama_chat(messages):
@@ -667,6 +731,18 @@ def chat_api():
             model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
                 conn, conversation_id
             )
+            if web_search_enabled() and query_needs_fresh_web_data(user_text):
+                try:
+                    results = google_web_search(user_text, num=SEARCH_MAX_RESULTS)
+                    web_context = build_web_context_message(results)
+                    if web_context:
+                        model_messages = [
+                            model_messages[0],
+                            {"role": "system", "content": web_context},
+                            *model_messages[1:],
+                        ]
+                except Exception as exc:
+                    app.logger.warning("web search failed: %s", exc)
             conn.commit()
         finally:
             conn.close()

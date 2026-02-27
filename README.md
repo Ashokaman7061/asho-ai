@@ -24,6 +24,9 @@ $env:FLASK_DEBUG="1"
 $env:FLASK_SECRET_KEY="change-me-strong-secret"
 $env:COOKIE_SECURE="0"
 $env:GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
+$env:GOOGLE_SEARCH_API_KEY=""
+$env:GOOGLE_SEARCH_CX=""
+$env:SEARCH_MAX_RESULTS="5"
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
 ```
@@ -45,6 +48,9 @@ python main.py
 - `FLASK_SECRET_KEY=<strong-random-secret>`
 - `COOKIE_SECURE=1`
 - `GOOGLE_CLIENT_ID=<google-oauth-client-id>`
+- `GOOGLE_SEARCH_API_KEY=<google-custom-search-api-key>`
+- `GOOGLE_SEARCH_CX=<programmable-search-engine-id>`
+- `SEARCH_MAX_RESULTS=5`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
 - `MAX_MESSAGE_CHARS=4000`
@@ -67,3 +73,8 @@ On first startup, legacy `data/conversations.json` data is auto-migrated.
 
 If `GOOGLE_CLIENT_ID` is set, users must sign in with Google and each user sees only their own conversations.
 If empty, app stays public mode and uses shared `public` conversations.
+
+## Real-Time Web Search
+
+Set `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_CX` to enable live Google Programmable Search.
+For queries needing fresh data (latest/current/today/news/price etc.), app auto-fetches web snippets and provides them to the model.
