@@ -974,6 +974,30 @@
       background: #df3e3e;
       color: #fff;
     }
+    .voice-btn {
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: var(--panel-2);
+      color: var(--muted);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: all .2s ease;
+      flex: 0 0 auto;
+    }
+    .voice-btn:hover { background: var(--hover); color: var(--text); }
+    .voice-btn.active {
+      background: color-mix(in srgb, var(--accent) 20%, var(--panel-2));
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    }
+    .voice-btn.recording {
+      background: #df3e3e;
+      color: #fff;
+      border-color: transparent;
+    }
 
     .hidden-when-collapsed { display: inline; }
     .sidebar.closed .hidden-when-collapsed { display: none; }
@@ -1141,6 +1165,24 @@
       <div class="input-bar">
         <form id="f" class="input-inner">
           <textarea id="q" rows="1" placeholder="Ask anything"></textarea>
+          <button type="button" id="voiceModeBtn" class="voice-btn" aria-label="Toggle voice mode">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 10c0-1.1.9-2 2-2h2"></path><path d="M17 8h2a2 2 0 0 1 2 2v4"></path>
+              <rect x="7" y="6" width="10" height="12" rx="3"></rect>
+            </svg>
+          </button>
+          <button type="button" id="recordBtn" class="voice-btn" aria-label="Start recording">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="3" width="6" height="12" rx="3"></rect>
+              <path d="M5 11a7 7 0 0 0 14 0"></path>
+              <path d="M12 18v3"></path>
+            </svg>
+          </button>
+          <button type="button" id="interruptBtn" class="voice-btn" aria-label="Interrupt">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+            </svg>
+          </button>
           <button type="submit" id="sendBtn" aria-label="Send">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h13" stroke-linecap="round" />
@@ -1296,6 +1338,9 @@
     const welcomePanel = document.getElementById("welcomePanel");
     const form = document.getElementById("f");
     const input = document.getElementById("q");
+    const voiceModeBtn = document.getElementById("voiceModeBtn");
+    const recordBtn = document.getElementById("recordBtn");
+    const interruptBtn = document.getElementById("interruptBtn");
     const sendBtn = document.getElementById("sendBtn");
     const sendIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13" stroke-linecap="round"></path><path d="m12 5 7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
     const stopIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"></rect></svg>';
@@ -1314,6 +1359,14 @@
     let currentUser = null;
     let authMode = "signin";
     let pendingAction = null;
+    let voiceModeEnabled = false;
+    let isRecording = false;
+    let mediaRecorder = null;
+    let mediaStream = null;
+    let recordChunks = [];
+    let isAudioPlaying = false;
+    let activeAudio = null;
+    let ttsAbortController = null;
     const AUTH_ENABLED = {{ 'true' if auth_enabled else 'false' }};
     const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
 
@@ -1403,6 +1456,9 @@
       loginGate.style.display = show ? "grid" : "none";
       input.disabled = show;
       sendBtn.disabled = show;
+      voiceModeBtn.disabled = show;
+      recordBtn.disabled = show;
+      interruptBtn.disabled = show;
       newChatBtn.disabled = show;
     }
 
@@ -1974,9 +2030,118 @@
     function setStreaming(streaming) {
       isStreaming = streaming;
       input.disabled = streaming;
+      voiceModeBtn.disabled = streaming;
+      recordBtn.disabled = streaming;
       sendBtn.classList.toggle("is-stop", streaming);
       sendBtn.setAttribute("aria-label", streaming ? "Stop" : "Send");
       sendBtn.innerHTML = streaming ? stopIcon : sendIcon;
+    }
+
+    function stopAllVoiceActivity() {
+      if (mediaRecorder && isRecording) {
+        try { mediaRecorder.stop(); } catch {}
+      }
+      isRecording = false;
+      recordBtn.classList.remove("recording");
+      recordBtn.setAttribute("aria-label", "Start recording");
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+      }
+      if (ttsAbortController) {
+        ttsAbortController.abort();
+        ttsAbortController = null;
+      }
+      if (activeAudio) {
+        try { activeAudio.pause(); } catch {}
+        activeAudio = null;
+      }
+      isAudioPlaying = false;
+    }
+
+    async function transcribeAudio(blob) {
+      const fd = new FormData();
+      fd.append("audio", blob, "voice.webm");
+      fd.append("language_code", "unknown");
+      fd.append("with_diarization", "false");
+      fd.append("num_speakers", "2");
+      const res = await fetch("/voice/stt", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "STT failed");
+      return (data.text || "").trim();
+    }
+
+    async function speakWithSarvam(text) {
+      if (!text) return;
+      if (ttsAbortController) ttsAbortController.abort();
+      ttsAbortController = new AbortController();
+      const response = await fetch("/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ttsAbortController.signal,
+        body: JSON.stringify({
+          text,
+          target_language_code: "hi-IN",
+          speaker: "shubh",
+          model: "bulbul:v3",
+          pace: 1.1,
+          speech_sample_rate: 22050,
+          output_audio_codec: "mp3",
+          enable_preprocessing: true,
+        }),
+      });
+      if (!response.ok) {
+        const msg = await response.text().catch(() => "");
+        throw new Error(msg || `TTS failed (${response.status})`);
+      }
+      const chunks = [];
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const blob = new Blob(chunks, { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      activeAudio = audio;
+      isAudioPlaying = true;
+      await new Promise((resolve) => {
+        audio.onended = resolve;
+        audio.onerror = resolve;
+        audio.play().catch(resolve);
+      });
+      isAudioPlaying = false;
+      activeAudio = null;
+      URL.revokeObjectURL(url);
+    }
+
+    async function startRecording() {
+      if (isRecording || isStreaming) return;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        addMessageRow("assistant", "Browser does not support microphone capture.");
+        return;
+      }
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      recordChunks = [];
+      mediaRecorder = new MediaRecorder(mediaStream);
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordChunks.push(e.data);
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      recordBtn.classList.add("recording");
+      recordBtn.setAttribute("aria-label", "Stop recording");
     }
 
     function applyTheme(theme, persistTheme = true) {
@@ -2101,6 +2266,31 @@
         e.preventDefault();
         form.requestSubmit();
       }
+    });
+    recordBtn.addEventListener("click", async () => {
+      if (isRecording) {
+        await stopRecordingAndSend();
+      } else {
+        try {
+          await startRecording();
+        } catch {
+          addMessageRow("assistant", "Microphone access blocked.");
+        }
+      }
+    });
+    voiceModeBtn.addEventListener("click", async () => {
+      voiceModeEnabled = !voiceModeEnabled;
+      voiceModeBtn.classList.toggle("active", voiceModeEnabled);
+      if (voiceModeEnabled && !isRecording && !isStreaming && !isAudioPlaying) {
+        try { await startRecording(); } catch {}
+      }
+      if (!voiceModeEnabled && isRecording) {
+        stopAllVoiceActivity();
+      }
+    });
+    interruptBtn.addEventListener("click", () => {
+      stopAllVoiceActivity();
+      if (controller) controller.abort();
     });
 
     themeModeButtons.forEach((btn) => {
@@ -2272,50 +2462,46 @@
       document.querySelectorAll(".chat-menu.open").forEach((m) => m.classList.remove("open"));
     });
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    async function sendMessage(text, fromVoice = false) {
+      if (!text) return;
+      if (AUTH_ENABLED && !currentUser) return;
       if (isStreaming) {
         if (controller) controller.abort();
         return;
       }
-
-      const text = input.value.trim();
-      if (!text) return;
-      if (AUTH_ENABLED && !currentUser) return;
+      if (fromVoice) {
+        stopAllVoiceActivity();
+      }
 
       setStreaming(true);
-      input.value = "";
-      autoResize();
+      if (!fromVoice) {
+        input.value = "";
+        autoResize();
+      }
       const userNode = addMessageRow("user", text);
       ensureUserMessageActions(userNode);
 
       removeTyping();
       addTyping();
-
       controller = new AbortController();
+      let shouldResumeVoiceLoop = false;
 
       try {
         const payload = { message: text };
         if (activeChatId) payload.conversation_id = activeChatId;
-
         const res = await fetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
-
         if (!res.ok || !res.body) {
           removeTyping();
           addMessageRow("assistant", "Request failed.");
           return;
         }
-
         const responseConversationId = res.headers.get("X-Conversation-Id");
-        if (responseConversationId) {
-          activeChatId = responseConversationId;
-        }
-
+        if (responseConversationId) activeChatId = responseConversationId;
         const titleFromHeader = res.headers.get("X-Conversation-Title");
         if (titleFromHeader) {
           chatTitle.textContent = titleFromHeader;
@@ -2324,11 +2510,9 @@
         }
         removeTyping();
         const botDiv = addMessageRow("assistant", "");
-
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let botText = "";
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -2337,20 +2521,64 @@
           addCopyButtons(botDiv);
         }
         ensureMessageActions(botDiv);
-
         await loadConversations(activeChatId);
+        if (fromVoice && botText.trim()) {
+          try {
+            await speakWithSarvam(botText.trim());
+          } catch {
+            addMessageRow("assistant", "TTS failed.");
+          }
+          shouldResumeVoiceLoop = voiceModeEnabled;
+        }
       } catch (err) {
         removeTyping();
-        if (err.name === "AbortError") {
-          addMessageRow("assistant", "Stopped.");
-        } else {
-          addMessageRow("assistant", "Request failed.");
-        }
+        if (err.name === "AbortError") addMessageRow("assistant", "Stopped.");
+        else addMessageRow("assistant", "Request failed.");
       } finally {
         controller = undefined;
         setStreaming(false);
+        if (fromVoice && shouldResumeVoiceLoop && !isAudioPlaying && !isRecording) {
+          try { await startRecording(); } catch {}
+        }
         input.focus();
       }
+    }
+
+    async function stopRecordingAndSend() {
+      if (!mediaRecorder || !isRecording) return;
+      await new Promise((resolve) => {
+        mediaRecorder.onstop = resolve;
+        mediaRecorder.stop();
+      });
+      isRecording = false;
+      recordBtn.classList.remove("recording");
+      recordBtn.setAttribute("aria-label", "Start recording");
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+      }
+      const blob = new Blob(recordChunks, { type: "audio/webm" });
+      if (!blob.size) return;
+      try {
+        const text = await transcribeAudio(blob);
+        if (!text) {
+          addMessageRow("assistant", "No speech detected.");
+          if (voiceModeEnabled) await startRecording();
+          return;
+        }
+        await sendMessage(text, true);
+      } catch {
+        addMessageRow("assistant", "Voice transcription failed.");
+        if (voiceModeEnabled) {
+          try { await startRecording(); } catch {}
+        }
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      await sendMessage(text, false);
     });
 
     window.addEventListener("resize", () => {

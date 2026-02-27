@@ -30,6 +30,13 @@ AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "1") == "1"
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
+SARVAM_STT_URL = os.getenv(
+    "SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text"
+).strip()
+SARVAM_TTS_URL = os.getenv(
+    "SARVAM_TTS_URL", "https://api.sarvam.ai/text-to-speech/stream"
+).strip()
 
 SYSTEM_PROMPT = (
     "You are Asho AI, an assistant built to help the user effectively. "
@@ -272,6 +279,12 @@ def stream_ollama_chat(messages):
             token = part.get("message", {}).get("content")
             if token:
                 yield token
+
+
+def sarvam_headers():
+    return {
+        "api-subscription-key": SARVAM_API_KEY,
+    }
 
 
 def client_ip():
@@ -967,6 +980,90 @@ def chat_api():
     response.headers["X-Conversation-Id"] = conversation_id
     response.headers["X-Conversation-Title"] = current_title
     return response
+
+
+@app.post("/voice/stt")
+def voice_stt_api():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    if not SARVAM_API_KEY:
+        return jsonify({"error": "sarvam api key not configured"}), 503
+    file = request.files.get("audio")
+    if not file:
+        return jsonify({"error": "audio file is required"}), 400
+    filename = file.filename or "audio.webm"
+    content_type = file.mimetype or "audio/webm"
+    files = {"file": (filename, file.stream, content_type)}
+    data = {
+        "model": "saaras:v3",
+        "mode": "transcribe",
+        "language_code": request.form.get("language_code", "unknown"),
+        "with_diarization": request.form.get("with_diarization", "false"),
+        "num_speakers": request.form.get("num_speakers", "2"),
+    }
+    try:
+        res = httpx.post(
+            SARVAM_STT_URL,
+            headers=sarvam_headers(),
+            data=data,
+            files=files,
+            timeout=180.0,
+        )
+        res.raise_for_status()
+        payload = res.json()
+    except Exception as exc:
+        app.logger.exception("sarvam stt failed: %s", exc)
+        return jsonify({"error": "stt request failed"}), 502
+    text = (
+        payload.get("transcript")
+        or payload.get("text")
+        or payload.get("result", {}).get("transcript")
+        or ""
+    ).strip()
+    return jsonify({"text": text, "raw": payload})
+
+
+@app.post("/voice/tts")
+def voice_tts_api():
+    user_sub = require_user()
+    if not user_sub:
+        return jsonify({"error": "auth required"}), 401
+    if not SARVAM_API_KEY:
+        return jsonify({"error": "sarvam api key not configured"}), 503
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    req_payload = {
+        "text": text,
+        "target_language_code": payload.get("target_language_code", "hi-IN"),
+        "speaker": payload.get("speaker", "shubh"),
+        "model": payload.get("model", "bulbul:v3"),
+        "pace": float(payload.get("pace", 1.1)),
+        "speech_sample_rate": int(payload.get("speech_sample_rate", 22050)),
+        "output_audio_codec": payload.get("output_audio_codec", "mp3"),
+        "enable_preprocessing": bool(payload.get("enable_preprocessing", True)),
+    }
+
+    def generate():
+        try:
+            with httpx.stream(
+                "POST",
+                SARVAM_TTS_URL,
+                headers={**sarvam_headers(), "Content-Type": "application/json"},
+                json=req_payload,
+                timeout=180.0,
+            ) as res:
+                res.raise_for_status()
+                for chunk in res.iter_bytes():
+                    if chunk:
+                        yield chunk
+        except Exception as exc:
+            app.logger.exception("sarvam tts failed: %s", exc)
+            return
+
+    return Response(generate(), mimetype="audio/mpeg")
 
 
 @app.post("/reset")

@@ -29,6 +29,9 @@ $env:SEARCH_TIMEOUT_SECONDS="12"
 $env:DDGS_PROXY=""
 $env:OLLAMA_MODEL="ministral-3:14b-cloud"
 $env:OLLAMA_API_KEY=""
+$env:SARVAM_API_KEY="your-sarvam-api-key"
+$env:SARVAM_STT_URL="https://api.sarvam.ai/speech-to-text"
+$env:SARVAM_TTS_URL="https://api.sarvam.ai/text-to-speech/stream"
 ```
 
 5. Run app.
@@ -53,6 +56,9 @@ python main.py
 - `DDGS_PROXY=<optional-proxy-url>`
 - `OLLAMA_MODEL=ministral-3:14b-cloud`
 - `OLLAMA_API_KEY=<your-ollama-api-key>`
+- `SARVAM_API_KEY=<your-sarvam-api-key>`
+- `SARVAM_STT_URL=https://api.sarvam.ai/speech-to-text`
+- `SARVAM_TTS_URL=https://api.sarvam.ai/text-to-speech/stream`
 - `MAX_MESSAGE_CHARS=4000`
 - `RATE_LIMIT_WINDOW_SECONDS=60`
 - `RATE_LIMIT_MAX_REQUESTS=20`
@@ -79,3 +85,19 @@ If empty, app stays public mode and uses shared `public` conversations.
 App uses `duckduckgo_search` (DDGS) for live web lookup.
 For queries needing fresh data (latest/current/today/news/price etc.), app auto-fetches snippets/news and provides them to the model.
 Optional: set `DDGS_PROXY` for proxy-based traffic if needed.
+
+## Real-Time Voice Conversation (Sarvam)
+
+Frontend includes:
+- Push-to-talk recording button
+- Voice mode auto-loop (listen -> transcribe -> chat -> speak)
+- Interrupt button to stop ongoing playback/recording
+
+Audio capture is configured with:
+- `echoCancellation: true`
+- `noiseSuppression: true`
+- `autoGainControl: true`
+
+Backend proxies:
+- `POST /voice/stt` -> Sarvam STT
+- `POST /voice/tts` -> Sarvam streaming TTS
