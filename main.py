@@ -311,6 +311,16 @@ def has_sarvam_api_key():
     return bool(sarvam_headers().get("api-subscription-key"))
 
 
+def tts_url_candidates():
+    primary = sarvam_tts_url()
+    candidates = [primary]
+    if primary.endswith("/stream"):
+        candidates.append(primary.rsplit("/stream", 1)[0])
+    elif primary.endswith("/text-to-speech"):
+        candidates.append(primary.rstrip("/") + "/stream")
+    return candidates
+
+
 def client_ip():
     forwarded = (request.headers.get("X-Forwarded-For") or "").strip()
     if forwarded:
@@ -1102,13 +1112,22 @@ def voice_tts_api():
 
     try:
         client = httpx.Client(timeout=180.0)
-        req = client.build_request(
-            "POST",
-            sarvam_tts_url(),
-            headers={**sarvam_headers(), "Content-Type": "application/json"},
-            json=req_payload,
-        )
-        upstream = client.send(req, stream=True)
+        upstream = None
+        for tts_url in tts_url_candidates():
+            req = client.build_request(
+                "POST",
+                tts_url,
+                headers={**sarvam_headers(), "Content-Type": "application/json"},
+                json=req_payload,
+            )
+            upstream = client.send(req, stream=True)
+            if upstream.status_code == 404:
+                upstream.close()
+                upstream = None
+                continue
+            break
+        if upstream is None:
+            raise RuntimeError("tts endpoint not found")
     except Exception as exc:
         app.logger.exception("sarvam tts request init failed: %s", exc)
         return jsonify({"error": "tts request failed", "details": str(exc)}), 502
