@@ -463,6 +463,24 @@
     .settings-close { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
     .settings-pane { display: none; color: var(--muted); font-size: 14px; line-height: 1.6; }
     .settings-pane.active { display: block; }
+    .theme-group { display: grid; gap: 10px; }
+    .theme-title { margin: 0 0 4px; color: var(--text); font-size: 15px; font-weight: 600; }
+    .theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .theme-option {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 8px;
+      cursor: pointer;
+      text-align: center;
+      font-size: 13px;
+    }
+    .theme-option.active {
+      border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+      background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
+    }
+    .theme-note { font-size: 12px; color: var(--muted); }
     .profile-list { display: grid; gap: 10px; }
     .profile-item { border: 1px solid var(--border); background: var(--panel-2); border-radius: 10px; padding: 10px; }
     .profile-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
@@ -917,7 +935,15 @@
           <button id="settingsClose" class="settings-close" type="button" aria-label="Close settings">x</button>
         </div>
         <div id="paneGeneral" class="settings-pane active">
-          Theme and interface preferences will appear here.
+          <div class="theme-group">
+            <p class="theme-title">Theme</p>
+            <div class="theme-grid">
+              <button id="themeModeDark" class="theme-option" data-mode="dark" type="button">Dark</button>
+              <button id="themeModeLight" class="theme-option" data-mode="light" type="button">Light</button>
+              <button id="themeModeSystem" class="theme-option" data-mode="system" type="button">System</button>
+            </div>
+            <div class="theme-note">System uses your device appearance automatically.</div>
+          </div>
         </div>
         <div id="paneProfile" class="settings-pane">
           <div class="profile-list">
@@ -974,6 +1000,7 @@
     const settingsModal = document.getElementById("settingsModal");
     const settingsClose = document.getElementById("settingsClose");
     const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+    const themeModeButtons = Array.from(document.querySelectorAll(".theme-option"));
     const paneGeneral = document.getElementById("paneGeneral");
     const paneProfile = document.getElementById("paneProfile");
     const paneData = document.getElementById("paneData");
@@ -1025,6 +1052,15 @@
       authSwitchBtn.textContent = signUp ? "Sign in" : "Create account";
       authMessage.textContent = "";
       authMessage.className = "login-meta";
+    }
+
+    function getThemeMode() {
+      const mode = localStorage.getItem("theme_mode");
+      return mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+    }
+
+    function applyThemeModeVisual(mode) {
+      themeModeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === mode));
     }
 
     function toggleUserMenu(show) {
@@ -1357,9 +1393,9 @@
       sendBtn.innerHTML = streaming ? stopIcon : sendIcon;
     }
 
-    function applyTheme(theme) {
+    function applyTheme(theme, persistTheme = true) {
       document.body.setAttribute("data-theme", theme);
-      localStorage.setItem("theme", theme);
+      if (persistTheme) localStorage.setItem("theme", theme);
       if (theme === "light") {
         themeIcon.innerHTML = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linecap="round" stroke-linejoin="round"></path>';
       } else {
@@ -1367,14 +1403,21 @@
       }
     }
 
-    function initTheme() {
-      const stored = localStorage.getItem("theme");
-      if (stored === "light" || stored === "dark") {
-        applyTheme(stored);
-        return;
+    function applyThemeMode(mode) {
+      const m = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+      localStorage.setItem("theme_mode", m);
+      applyThemeModeVisual(m);
+      if (m === "system") {
+        const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+        applyTheme(prefersLight ? "light" : "dark", false);
+      } else {
+        applyTheme(m);
       }
-      const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-      applyTheme(prefersLight ? "light" : "dark");
+    }
+
+    function initTheme() {
+      const mode = getThemeMode();
+      applyThemeMode(mode);
     }
 
     function escapeHtml(text) {
@@ -1478,7 +1521,14 @@
 
     themeToggle.addEventListener("click", () => {
       const current = document.body.getAttribute("data-theme") === "light" ? "light" : "dark";
-      applyTheme(current === "light" ? "dark" : "light");
+      const next = current === "light" ? "dark" : "light";
+      applyThemeMode(next);
+    });
+    themeModeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => applyThemeMode(btn.dataset.mode));
+    });
+    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+      if (getThemeMode() === "system") applyThemeMode("system");
     });
     authSwitchBtn.addEventListener("click", () => {
       setAuthMode(authMode === "signin" ? "signup" : "signin");
