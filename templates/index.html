@@ -1356,6 +1356,7 @@
     let ttsAbortController = null;
     let recordAutoStopTimer = null;
     let sttFailureCount = 0;
+    let noSpeechCount = 0;
     const MAX_VOICE_TEXT_CHARS = 600;
     const SARVAM_ALLOWED_LANGS = new Set([
       "unknown", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN",
@@ -2653,14 +2654,20 @@
         const text = await transcribeAudio(blob);
         sttFailureCount = 0;
         if (!text) {
-          addMessageRow("assistant", "No speech detected.");
+          noSpeechCount += 1;
+          if (noSpeechCount >= 3) {
+            addMessageRow("assistant", "No speech detected. Please speak a bit closer to the mic.");
+            noSpeechCount = 0;
+          }
           if (voiceConversationActive) await startRecording();
           return;
         }
+        noSpeechCount = 0;
         const stableText = text.replace(/(.)\1{8,}/g, "$1$1$1");
         await sendMessage(stableText, true);
       } catch (err) {
         sttFailureCount += 1;
+        noSpeechCount = 0;
         addMessageRow("assistant", `Voice transcription failed: ${err?.message || "unknown error"}`);
         if (voiceConversationActive && sttFailureCount < 3) {
           try { await startRecording(); } catch {}

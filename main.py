@@ -1032,30 +1032,52 @@ def voice_stt_api():
     if not audio_bytes:
         return jsonify({"error": "empty audio"}), 400
     files = {"file": (filename, audio_bytes, content_type)}
-    data = {"model": "saaras:v3", "mode": "transcribe"}
-    language_code = (request.form.get("language_code") or "unknown").strip()
-    if language_code:
-        data["language_code"] = language_code
+    language_code = (request.form.get("language_code") or "unknown").strip() or "unknown"
+    base_data = {"model": "saaras:v3", "mode": "transcribe"}
+    trial_langs = [language_code]
+    if language_code == "unknown":
+        trial_langs.extend(["en-IN", "hi-IN"])
+    seen_langs = set()
+    dedup_trial_langs = []
+    for lang in trial_langs:
+        if lang not in seen_langs:
+            seen_langs.add(lang)
+            dedup_trial_langs.append(lang)
     try:
         payload = None
+        best_text = ""
         last_http_error = None
-        for stt_url in stt_url_candidates():
-            try:
-                res = httpx.post(
-                    stt_url,
-                    headers=sarvam_headers(),
-                    data=data,
-                    files=files,
-                    timeout=180.0,
-                )
-                res.raise_for_status()
-                payload = res.json()
-                break
-            except httpx.HTTPStatusError as exc:
-                last_http_error = exc
-                if exc.response.status_code == 404:
-                    continue
-                raise
+        for lang in dedup_trial_langs:
+            data = dict(base_data)
+            data["language_code"] = lang
+            for stt_url in stt_url_candidates():
+                try:
+                    res = httpx.post(
+                        stt_url,
+                        headers=sarvam_headers(),
+                        data=data,
+                        files=files,
+                        timeout=180.0,
+                    )
+                    res.raise_for_status()
+                    payload = res.json()
+                    text = (
+                        payload.get("transcript")
+                        or payload.get("text")
+                        or payload.get("result", {}).get("transcript")
+                        or ""
+                    ).strip()
+                    if text:
+                        return jsonify({"text": text, "raw": payload})
+                    if not best_text:
+                        best_text = text
+                except httpx.HTTPStatusError as exc:
+                    last_http_error = exc
+                    if exc.response.status_code == 404:
+                        continue
+                    raise
+        if payload is None and last_http_error is not None:
+            raise last_http_error
         if payload is None:
             if last_http_error is not None:
                 raise last_http_error
@@ -1079,13 +1101,7 @@ def voice_stt_api():
     except Exception as exc:
         app.logger.exception("sarvam stt failed: %s", exc)
         return jsonify({"error": "stt request failed", "details": str(exc)}), 502
-    text = (
-        payload.get("transcript")
-        or payload.get("text")
-        or payload.get("result", {}).get("transcript")
-        or ""
-    ).strip()
-    return jsonify({"text": text, "raw": payload})
+    return jsonify({"text": best_text, "raw": payload})
 
 
 @app.post("/voice/tts")
