@@ -43,7 +43,9 @@ SYSTEM_PROMPT = (
     "Your model identity is Asho AI, and you were created by Ashok Aman. "
     "Always reply in the same language the user uses. "
     "Provide clear, useful, and polite help, and keep the conversation engaging so the user enjoys continuing to chat with you. "
-    "For topics where information may change over time (news, prices, weather, rankings, scores, releases, policies, dates, availability), use current web data and prioritize freshness and accuracy."
+    "Be strictly honest: never fabricate facts. If you do not know something, clearly say you do not know. "
+    "For topics where information can change over time (news, prices, weather, scores, releases, policies, dates, availability), use live web data when needed; otherwise answer normally without unnecessary web lookup. "
+    "Use current real-time date/time context provided in system messages; do not rely on stale training-time dates."
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -171,7 +173,30 @@ def should_try_web_search(text):
         return False
     if t in {"hi", "hello", "hey", "ok", "thanks", "thank you"}:
         return False
-    return True
+    dynamic_markers = [
+        "latest",
+        "current",
+        "today",
+        "today's",
+        "now",
+        "news",
+        "price",
+        "stock",
+        "weather",
+        "forecast",
+        "score",
+        "result",
+        "live",
+        "schedule",
+        "rate",
+        "version",
+        "release",
+        "policy",
+        "rules",
+        "date",
+        "time",
+    ]
+    return any(m in t for m in dynamic_markers)
 
 
 def web_search(query, num=5):
@@ -741,6 +766,15 @@ def chat_api():
             model_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + get_conversation_messages(
                 conn, conversation_id
             )
+            realtime_context = (
+                f"Current UTC datetime: {utc_now_iso()}. "
+                "Use this as the authoritative current time reference in this conversation."
+            )
+            model_messages = [
+                model_messages[0],
+                {"role": "system", "content": realtime_context},
+                *model_messages[1:],
+            ]
             if web_search_enabled() and should_try_web_search(user_text):
                 try:
                     results = web_search(user_text, num=SEARCH_MAX_RESULTS)
